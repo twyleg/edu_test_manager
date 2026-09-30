@@ -15,14 +15,16 @@ export interface AppState {
   message: string;
   error: string;
   progress: number;
+  scanThreads: number;
 }
 
 export const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, value => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[value]!);
 
-const icon = (kind: 'file' | 'folder' | 'cut') => {
+const icon = (kind: 'file' | 'folder' | 'cut' | 'zoom') => {
   const paths = {
+    zoom: '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6M10 7v6"/>',
     file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
     folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
     cut: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="m8.2 8.2 12.8 12.8M14 10l7-7M8.2 15.8 3-3"/>',
@@ -35,6 +37,14 @@ export function renderApp(state: AppState): string {
   const locked = Boolean(busy || state.uploadStarted);
   const selected = state.localFile?.name || state.source?.name;
   const examCount = state.frontPages.filter(Boolean).length;
+  const groups: { start: number; end: number; candidate: number }[] = [];
+  let candidate = 0;
+  pages.forEach((_, index) => {
+    if (index === 0 || state.frontPages[index]) {
+      if (state.frontPages[index]) candidate++;
+      groups.push({ start: index, end: index, candidate });
+    } else groups[groups.length - 1].end = index;
+  });
   const uploaded = files.filter(file => file.uploaded).length;
   const allUploaded = files.length > 0 && uploaded === files.length;
   const disabled = (condition: boolean) => condition ? 'disabled' : '';
@@ -73,6 +83,11 @@ export function renderApp(state: AppState): string {
             <p class="folder-hint">Click the Name column in the picker to sort alphabetically. Single-click the folder’s row, then click Select. New folders are created inside the selected folder, or in My Drive if none is selected.</p>
           </div>
         </div>
+        <div class="px-4 py-3 border-top d-flex flex-wrap gap-3 align-items-center">
+          <label for="scan-threads" class="fw-semibold">Scan threads</label>
+          <input id="scan-threads" class="form-control" style="width:5rem" type="number" min="1" max="8" step="1" value="${state.scanThreads}" ${disabled(locked)} aria-describedby="scan-hint" />
+          <span id="scan-hint" class="text-secondary small">Search the top 20% of each page. More threads use more memory (1–8).</span>
+        </div>
         <div class="panel-footer"><div><strong>Ready when you are.</strong><span>Scan for QR markers, review the split, then save your files.</span></div>
           <button id="scan" class="btn btn-primary" ${disabled(locked || !selected || pages.length > 0)}>${icon('cut')} ${busy === 'scan' ? 'Scanning…' : 'Scan PDF'}</button></div>
       </section>
@@ -83,12 +98,20 @@ export function renderApp(state: AppState): string {
       ${pages.length ? `<section class="review-section" aria-labelledby="review-heading">
         <div class="section-heading"><div><p class="eyebrow">REVIEW THE SPLIT</p><h2 id="review-heading">${pages.length} page${pages.length === 1 ? '' : 's'}. ${examCount} exam${examCount === 1 ? '' : 's'}.</h2></div>
           <button id="reset" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy))}>Start a new batch</button></div>
-        <p class="section-description">A checked page starts a new exam. All following pages belong to it until the next checked page. Correct any missed or unexpected markers before preparing the PDFs.</p>
-        <div class="page-grid">${pages.map((page, index) => `<label class="page-card ${state.frontPages[index] ? 'front-page' : ''}">
-          <div class="page-image"><img src="${page.thumbnailUrl}" alt="Scanned page ${page.pageNumber}" loading="lazy"/><span class="page-index">${page.pageNumber}</span></div>
-          <span class="page-detection">${page.hasQr ? 'QR marker detected' : 'No QR marker detected'}</span>
-          <span class="page-check"><input id="front-${index}" type="checkbox" data-page="${index}" ${state.frontPages[index] ? 'checked' : ''} ${disabled(locked)}/> Front page</span>
-        </label>`).join('')}</div>
+        <p class="section-description">A checked page starts a new exam. All following pages belong to it until the next checked page. Each row is one candidate exam. Changing a checkbox updates the rows immediately. Use the magnifier to inspect a full page.</p>
+        <div class="exam-groups">${groups.map(group => `<section class="exam-group ${group.candidate ? '' : 'unassigned-group'}" aria-label="${group.candidate ? `Exam ${group.candidate}` : 'Unassigned pages'}">
+          <header class="exam-group-heading"><h3>${group.candidate ? `Exam ${String(group.candidate).padStart(2, '0')}` : 'Unassigned pages'}</h3><span>Pages ${group.start + 1}–${group.end + 1} · ${group.end - group.start + 1} page${group.end === group.start ? '' : 's'}</span></header>
+          ${!group.candidate ? '<p class="unassigned-note">Select a front page to include these leading pages in an exam.</p>' : ''}
+          <div class="page-grid" tabindex="0" aria-label="${group.candidate ? `Pages of exam ${group.candidate}` : 'Unassigned page previews'}">${pages.slice(group.start, group.end + 1).map((page, offset) => {
+            const index = group.start + offset;
+            return `<article class="page-card ${state.frontPages[index] ? 'front-page' : ''}">
+              <div class="page-image"><img src="${page.thumbnailUrl}" alt="Scanned page ${page.pageNumber}" loading="lazy"/><span class="page-index">${page.pageNumber}</span></div>
+              <span class="page-detection">${page.hasQr ? 'QR marker detected' : 'No QR marker detected'}</span>
+              <div class="page-controls"><label class="page-check"><input id="front-${index}" type="checkbox" data-page="${index}" ${state.frontPages[index] ? 'checked' : ''} ${disabled(locked)}/> Front page</label>
+                <button id="preview-${index}" data-preview="${index}" class="btn btn-sm btn-outline-secondary page-zoom" aria-label="View page ${page.pageNumber}" title="View full page" ${disabled(Boolean(busy))}>${icon('zoom')}</button></div>
+            </article>`;
+          }).join('')}</div>
+        </section>`).join('')}</div>
         <div class="review-actions"><span>Original pages and print quality are preserved.</span><button id="prepare" class="btn btn-primary" ${disabled(locked || files.length > 0)}>Prepare ${examCount} PDF${examCount === 1 ? '' : 's'}</button></div>
       </section>` : ''}
       ${files.length ? `<section class="results-section" aria-labelledby="results-heading"><div class="section-heading"><div><p class="eyebrow">INDIVIDUAL EXAMS</p><h2 id="results-heading">${allUploaded ? 'All exams saved to Drive' : 'Your PDFs are ready'}</h2></div><span class="count-badge">${uploaded} / ${files.length} saved</span></div>

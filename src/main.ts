@@ -1,6 +1,7 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles/main.css';
 import { GoogleDrive } from './googleDrive';
+import { openPagePreview } from './pagePreview';
 import { openNewFolderDialog } from './folderDialog';
 import { hasGoogleConfig } from './config';
 import { groupPages } from './grouping';
@@ -9,7 +10,7 @@ import { renderApp, type AppState } from './view';
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const drive = new GoogleDrive();
 const state: AppState = { ready: false, connected: false, busy: '', pages: [], frontPages: [], files: [],
-  uploadStarted: false, message: '', error: '', progress: 0 };
+  uploadStarted: false, message: '', error: '', progress: 0, scanThreads: 2 };
 let sourceBytes: Uint8Array | undefined;
 let controller: AbortController | undefined;
 
@@ -46,10 +47,10 @@ async function scan(): Promise<void> {
     const { scanPdf } = await import('./pdf');
     sourceBytes = state.localFile ? new Uint8Array(await state.localFile.arrayBuffer()) : await drive.downloadPdf(state.source!, controller.signal);
     state.pages = await scanPdf(sourceBytes, (completed, total) => {
-      state.message = `Scanning page ${Math.min(completed + 1, total)} of ${total} for QR markers…`;
+      state.message = `Scanned ${completed} of ${total} pages for QR markers…`;
       state.progress = completed / total * 100;
       render();
-    }, controller.signal);
+    }, controller.signal, state.scanThreads);
     state.frontPages = state.pages.map(page => page.hasQr);
     state.message = `Scan complete. Found ${state.frontPages.filter(Boolean).length} QR-marked front pages in ${state.pages.length} pages.`;
     try { groupPages(state.frontPages); } catch (error) { state.error = errorMessage(error); }
@@ -127,6 +128,10 @@ app.addEventListener('click', event => {
   const target = (event.target as HTMLElement).closest<HTMLButtonElement>('button');
   if (!target || target.disabled) return;
   try {
+    if (target.dataset.preview !== undefined && sourceBytes) {
+      openPagePreview(sourceBytes, Number(target.dataset.preview) + 1, target.id);
+      return;
+    }
     switch (target.id) {
       case 'connect':
         if (drive.connected) {
@@ -150,7 +155,11 @@ app.addEventListener('click', event => {
 app.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
   if (state.busy || state.uploadStarted) return;
-  if (input.id === 'local-pdf' && input.files?.[0]) {
+  if (input.id === 'scan-threads') {
+    const value = input.valueAsNumber;
+    state.scanThreads = Number.isFinite(value) ? Math.max(1, Math.min(8, Math.round(value))) : 2;
+    render();
+  } else if (input.id === 'local-pdf' && input.files?.[0]) {
     const file = input.files[0];
     if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') { reportError(new Error('Please choose a PDF file.')); return; }
     clearScan(); state.source = undefined; state.localFile = file; render();

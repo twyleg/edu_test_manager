@@ -44,8 +44,8 @@ For deployment, run `npm run build`, host `dist/` on HTTPS, add the production o
 2. Choose a writable **output folder**. In Picker, single-click the folder row and click **Select**. Double-clicking opens the folder; to select that folder, return to its parent and select its row. Folder selection and downloads support shared drives subject to your Google account’s permissions.
    - To sort alphabetically, click Picker’s **Name** column. Google Picker has no supported API for forcing a default sort order.
    - After connecting Drive, click **New folder** beside the selector to create a folder inside the selected directory, or in My Drive when no directory is selected. Enter its name and click **Create folder**; the new folder becomes the output destination. Creation is disabled after uploads begin.
-3. Click **Scan PDF**. Every page is rendered and checked for a QR code. The upper-left corner is checked first; full-page detection and a higher-resolution pass handle displaced or smaller codes. The QR payload is never used or stored. Scan progress is shown and scanning can be cancelled.
-4. Review the page thumbnails. Each checked **Front page** begins an exam; subsequent pages belong to that exam until the next checked page. Correct any missed or unwanted markers. No-marker scans and unmarked leading pages require correction, so no pages are silently dropped.
+3. Click **Scan PDF**. Only the full-width top 20% of each page is rendered for QR detection, with a higher-resolution retry for small codes. **Scan threads** defaults to 2 and accepts 1–8: independent Web Workers decode QR codes concurrently while PDF.js renders pages. Higher counts use more memory and may not be faster on every device. Full-page thumbnails are rendered separately at low resolution. The QR payload is never used or stored. Scan progress is shown and scanning can be cancelled.
+4. Review the page thumbnails. Each candidate exam has its own row with a page range; long rows scroll horizontally. Front-page checkbox changes immediately split or merge the rows. The magnifier beside each checkbox opens a detailed full-page view; close it with **Close** or **Escape**. Each checked **Front page** begins an exam; subsequent pages belong to that exam until the next checked page. Correct any missed or unwanted markers. No-marker scans and unmarked leading pages require correction, so no pages are silently dropped.
 5. Click **Prepare PDFs** to copy the page groups into individual files. Preview or download them before uploading. Page order, page dimensions and original page contents are preserved; output PDFs are not screenshots.
 6. Click **Save PDFs to Drive**. Files are created in the selected folder with names such as `Physics_exam-001_pages-1-2.pdf`. The original input is not modified. Each uploaded file gets a link to Drive.
 
@@ -61,9 +61,11 @@ If it still fails, open the browser’s developer console before clicking **Sele
 - The limited `drive.file` scope grants access to files selected with Picker and files created by the app. There is no mailbox access in Part I.
 - Like the reference app, the short-lived access token is cached in `sessionStorage` with an expiry buffer. Disconnect clears/revokes the token and clears the current batch. No refresh token is stored.
 - Keep the tab open during processing and upload retries. Reloading loses the batch, generated IDs, PDFs and retry state. Reprocessing after a reload can create another set of files.
-- QR recognition depends on scan quality. Review the detected boundaries; every QR code counts as a potential front-page marker, including unrelated QR codes elsewhere on a page. Manual corrections are available for unreadable markers.
-- Encrypted/password-protected or malformed PDFs are unsupported. Browser memory is the practical size limit for large scans; processing is sequential and raster resolution is bounded.
+- QR recognition depends on scan quality. Review the detected boundaries; every QR code counts as a potential front-page marker, including unrelated QR codes within the top 20%. Markers below that region (including upside-down scans) are not detected. Manual corrections are available for unreadable markers.
+- Encrypted/password-protected or malformed PDFs are unsupported. Browser memory is the practical size limit for large scans; concurrency and raster resolution are bounded.
 - CSV student matching and email drafts are deliberately left for Parts II and III. Part I names files by exam number and page range.
+
+OCR is not used as a prefilter: it would add text recognition work and could exclude genuine front pages when a keyword is misread. Only QR detection marks a page automatically; keywords alone never do.
 
 ## Verification
 
@@ -80,13 +82,16 @@ To use an existing Chromium/Chrome installation instead:
 PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/opt/google/chrome/chrome npm run test:e2e
 ```
 
+For an opt-in timing run against the local sample, use `SCAN_BENCHMARK=1 npm run test:e2e -- benchmark.spec.ts` (with the browser executable environment variable above if needed). It reports scan times for 1, 2 and 4 workers; PDF import and file transfer are outside the timer.
+
 Unit tests cover grouping, leading-page handling, naming, Drive permissions, token expiry and retry-safe uploads. Browser tests exercise actual PDF rendering/detection/splitting, manual corrections, and a simulated Google Picker/Drive workflow. The sample-PDF test runs when `20260911_142302_005443.pdf` is present at the repository root; PDFs are ignored by Git to avoid committing student scans. Live Google OAuth and upload still need a manual check with your project credentials.
 
 ## Source map
 
 - `src/main.ts`: workflow state, progress and event coordination.
 - `src/googleDrive.ts`: OAuth, Picker, downloads, folder validation and uploads.
-- `src/pdf.ts`: PDF rendering, QR scanning and lossless page copying.
+- `src/pdf.ts`: bounded concurrent page rendering and lossless page copying.
+- `src/qrScanner.ts`, `src/qr.worker.ts`: transferable pixel buffers and background QR detection.
 - `src/grouping.ts`: page range validation and output naming.
 - `src/view.ts`, `src/styles/main.css`: accessible, responsive workflow UI.
 - `tests/`: unit tests and browser integration tests.

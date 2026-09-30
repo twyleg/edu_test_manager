@@ -6,7 +6,6 @@ export default defineConfig({
     rollupOptions: { output: { manualChunks: {
       'pdf-renderer': ['pdfjs-dist'],
       'pdf-writer': ['pdf-lib'],
-      'qr-detector': ['jsqr'],
     } } },
   },
   server: { port: 8080, strictPort: true },
