@@ -74,10 +74,6 @@ export function renderApp(state: AppState): string {
         <p>This task is not implemented yet. Your current Slice exams batch stays available while you switch tabs.</p>
       </section>` : ''}
       <div id="panel-slice" role="tabpanel" aria-labelledby="task-slice" ${state.task === 'slice' ? '' : 'hidden'}>
-      <section class="intro"><div><p class="eyebrow">LESS PAPERWORK. MORE TEACHING.</p><h1>One scan. Individual exams.</h1>
-        <p class="lead-copy">Turn a stack of scanned tests into a PDF for each student. <br>Each QR-marked front page starts a new exam.</p></div>
-        <span class="part-label">TASK <span>/</span> SLICE EXAMS</span>
-      </section>
       ${!hasGoogleConfig() ? `<aside class="setup-note" role="alert"><strong>Check your Google Drive configuration.</strong> ${escapeHtml(getGoogleConfigError()!)} See the README for setup. You can try slicing a local PDF below.</aside>` : ''}
       <div id="error" role="alert" ${state.error ? '' : 'hidden'} class="alert alert-danger">${escapeHtml(state.error)}</div>
       ${pages.length ? `<div class="batch-actions"><button id="reset" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy))}>Start a new batch</button></div>` : ''}
@@ -102,7 +98,7 @@ export function renderApp(state: AppState): string {
           <input id="scan-threads" class="form-control" style="width:5rem" type="number" min="1" max="8" step="1" value="${state.scanThreads}" ${disabled(locked)} aria-describedby="scan-hint" />
           <span id="scan-hint" class="text-secondary small">Search the top 20% of each page. More threads use more memory (1–8).</span>
         </div>
-        <div class="panel-footer"><div><strong>Ready when you are.</strong><span>Scan for QR markers, review the split, then save your files.</span></div>
+        <div class="panel-footer"><div><span></span></div>
           <button id="scan" class="btn btn-primary" ${disabled(locked || !selected || pages.length > 0)}>${icon('cut')} ${busy === 'scan' ? 'Scanning…' : 'Scan PDF'}</button></div>
       </div></div></section>
       <div id="task-progress" tabindex="-1" class="progress-area ${processing ? 'progress-active progress-island' : ''}" ${state.message ? '' : 'hidden'}>
@@ -146,9 +142,8 @@ export function renderApp(state: AppState): string {
         <button id="upload" class="btn btn-primary" ${disabled(Boolean(busy) || !state.folder || allUploaded || !state.connected)}>${busy === 'upload' ? 'Saving to Drive…' : allUploaded ? 'All files saved' : state.uploadStarted ? 'Retry remaining uploads' : `Save ${files.length} PDFs to Drive`}</button></div>
       </section>` : ''}
       </div></section>
-      ${!pages.length ? `<section class="how-it-works"><div class="qr-symbol" aria-hidden="true">▦</div><div><h2>A small marker does the sorting.</h2><p>A QR code marks the beginning of a test. We keep each front page and all pages after it together, right up to the next QR code. The code’s contents don’t matter.</p></div></section>` : ''}
       </div>
-      <footer class="site-footer"><span>PDF processing happens in your browser.</span><span>Three independent tasks · Slice · Match · Draft</span></footer>
+      <footer class="site-footer"><span>EDU Test Manager.</span></footer>
     </main>`;
 }
 
