@@ -1,0 +1,104 @@
+import { getGoogleConfigError, hasGoogleConfig } from './config';
+import type { DriveItem, ExamFile, PageScan } from './types';
+
+export interface AppState {
+  ready: boolean;
+  connected: boolean;
+  busy: '' | 'picker' | 'scan' | 'split' | 'upload' | 'folder';
+  source?: DriveItem;
+  localFile?: File;
+  folder?: DriveItem;
+  pages: PageScan[];
+  frontPages: boolean[];
+  files: ExamFile[];
+  uploadStarted: boolean;
+  message: string;
+  error: string;
+  progress: number;
+}
+
+export const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, value => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+})[value]!);
+
+const icon = (kind: 'file' | 'folder' | 'cut') => {
+  const paths = {
+    file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
+    folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+    cut: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="m8.2 8.2 12.8 12.8M14 10l7-7M8.2 15.8 3-3"/>',
+  };
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind]}</svg>`;
+};
+
+export function renderApp(state: AppState): string {
+  const { busy, pages, files } = state;
+  const locked = Boolean(busy || state.uploadStarted);
+  const selected = state.localFile?.name || state.source?.name;
+  const examCount = state.frontPages.filter(Boolean).length;
+  const uploaded = files.filter(file => file.uploaded).length;
+  const allUploaded = files.length > 0 && uploaded === files.length;
+  const disabled = (condition: boolean) => condition ? 'disabled' : '';
+  const googleDisabled = !state.ready || !hasGoogleConfig();
+  return `
+    <header class="topbar"><div class="shell topbar-inner">
+      <a class="brand" href="./"><span class="brand-mark">${icon('cut')}</span> EDU <span class="brand-light">Test Manager</span></a>
+      <div class="connection"><span class="connection-label"><i class="status-dot ${state.connected ? 'online' : ''}"></i>${state.connected ? 'Drive connected' : 'Drive not connected'}</span>
+        <button id="connect" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy) || googleDisabled)}>${state.connected ? 'Disconnect' : 'Connect Google Drive'}</button>
+      </div>
+    </div></header>
+    <main class="shell">
+      <nav class="workflow" aria-label="Exam workflow">
+        <span class="workflow-current" aria-current="step"><b>01</b> Slice exams</span><span class="workflow-line"></span>
+        <span><b>02</b> Match students <small>Coming later</small></span><span class="workflow-line"></span>
+        <span><b>03</b> Prepare drafts <small>Coming later</small></span>
+      </nav>
+      <section class="intro"><div><p class="eyebrow">LESS PAPERWORK. MORE TEACHING.</p><h1>One scan. Individual exams.</h1>
+        <p class="lead-copy">Turn a stack of scanned tests into a PDF for each student. <br>Each QR-marked front page starts a new exam.</p></div>
+        <span class="part-label">PART I <span>/</span> PDF SLICING</span>
+      </section>
+      ${!hasGoogleConfig() ? `<aside class="setup-note" role="alert"><strong>Check your Google Drive configuration.</strong> ${escapeHtml(getGoogleConfigError()!)} See the README for setup. You can try slicing a local PDF below.</aside>` : ''}
+      <div id="error" role="alert" ${state.error ? '' : 'hidden'} class="alert alert-danger">${escapeHtml(state.error)}</div>
+      <section class="workspace-panel" aria-label="PDF selection">
+        <div class="selection-grid">
+          <div class="selection-step"><div class="step-heading"><span class="step-number">1</span><h2>Choose the exam scan</h2></div>
+            <p>The single PDF containing all students’ tests.</p>
+            <div class="file-selection ${selected ? 'has-selection' : ''}"><span class="selection-icon">${icon('file')}</span><div><strong>${selected ? escapeHtml(selected) : 'No PDF selected'}</strong><span>${selected ? state.localFile ? 'Local PDF · processed in your browser' : 'PDF from Google Drive' : 'Select a PDF from Google Drive'}</span></div></div>
+            <div class="selection-actions"><button id="choose-pdf" class="btn btn-outline-primary" ${disabled(locked || googleDisabled)}>Choose PDF from Drive</button>
+              <label class="local-label ${locked ? 'disabled' : ''}">or use a local PDF<input id="local-pdf" type="file" accept="application/pdf,.pdf" ${disabled(locked)} /></label></div>
+          </div>
+          <div class="selection-step"><div class="step-heading"><span class="step-number">2</span><h2>Choose the output folder</h2></div>
+            <p>Individual PDFs will be saved here in Google Drive.</p>
+            <div class="file-selection ${state.folder ? 'has-selection' : ''}"><span class="selection-icon">${icon('folder')}</span><div><strong>${state.folder ? escapeHtml(state.folder.name) : 'No folder selected'}</strong><span>${state.folder ? 'Google Drive destination' : 'Choose where the sliced exams will go'}</span></div></div>
+            <div class="selection-actions"><button id="choose-folder" class="btn btn-outline-primary" ${disabled(locked || googleDisabled)}>Choose Drive folder</button><button id="new-folder" class="btn btn-outline-primary" ${disabled(locked || googleDisabled || !state.connected)}>New folder</button></div>
+            <p class="folder-hint">Click the Name column in the picker to sort alphabetically. Single-click the folder’s row, then click Select. New folders are created inside the selected folder, or in My Drive if none is selected.</p>
+          </div>
+        </div>
+        <div class="panel-footer"><div><strong>Ready when you are.</strong><span>Scan for QR markers, review the split, then save your files.</span></div>
+          <button id="scan" class="btn btn-primary" ${disabled(locked || !selected || pages.length > 0)}>${icon('cut')} ${busy === 'scan' ? 'Scanning…' : 'Scan PDF'}</button></div>
+      </section>
+      <div class="progress-area" ${state.message ? '' : 'hidden'}>
+        <div class="progress-caption"><span role="status" aria-live="polite">${escapeHtml(state.message)}</span>${busy === 'scan' ? '<button id="cancel" class="btn btn-sm btn-outline-secondary">Cancel scan</button>' : ''}</div>
+        ${busy && busy !== 'picker' ? `<div class="progress" role="progressbar" aria-label="Processing progress" aria-valuenow="${Math.round(state.progress)}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:${state.progress}%"></div></div>` : ''}
+      </div>
+      ${pages.length ? `<section class="review-section" aria-labelledby="review-heading">
+        <div class="section-heading"><div><p class="eyebrow">REVIEW THE SPLIT</p><h2 id="review-heading">${pages.length} page${pages.length === 1 ? '' : 's'}. ${examCount} exam${examCount === 1 ? '' : 's'}.</h2></div>
+          <button id="reset" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy))}>Start a new batch</button></div>
+        <p class="section-description">A checked page starts a new exam. All following pages belong to it until the next checked page. Correct any missed or unexpected markers before preparing the PDFs.</p>
+        <div class="page-grid">${pages.map((page, index) => `<label class="page-card ${state.frontPages[index] ? 'front-page' : ''}">
+          <div class="page-image"><img src="${page.thumbnailUrl}" alt="Scanned page ${page.pageNumber}" loading="lazy"/><span class="page-index">${page.pageNumber}</span></div>
+          <span class="page-detection">${page.hasQr ? 'QR marker detected' : 'No QR marker detected'}</span>
+          <span class="page-check"><input id="front-${index}" type="checkbox" data-page="${index}" ${state.frontPages[index] ? 'checked' : ''} ${disabled(locked)}/> Front page</span>
+        </label>`).join('')}</div>
+        <div class="review-actions"><span>Original pages and print quality are preserved.</span><button id="prepare" class="btn btn-primary" ${disabled(locked || files.length > 0)}>Prepare ${examCount} PDF${examCount === 1 ? '' : 's'}</button></div>
+      </section>` : ''}
+      ${files.length ? `<section class="results-section" aria-labelledby="results-heading"><div class="section-heading"><div><p class="eyebrow">INDIVIDUAL EXAMS</p><h2 id="results-heading">${allUploaded ? 'All exams saved to Drive' : 'Your PDFs are ready'}</h2></div><span class="count-badge">${uploaded} / ${files.length} saved</span></div>
+        <div class="result-list">${files.map((file, index) => `<article class="result-row"><span class="result-number">${String(index + 1).padStart(2, '0')}</span><div class="result-info"><strong>${escapeHtml(file.name)}</strong><span>Pages ${file.start}–${file.end} · ${file.end - file.start + 1} page${file.end === file.start ? '' : 's'} · ${formatSize(file.blob.size)}</span>${file.error ? `<span class="text-danger">${escapeHtml(file.error)}</span>` : ''}</div><div class="result-actions"><a href="${file.previewUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Preview</a><a href="${file.previewUrl}" download="${escapeHtml(file.name)}" class="download-link">Download</a>${file.uploaded ? `<a class="saved-link" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${encodeURIComponent(file.driveId!)}/view">Saved ↗</a>` : '<span class="pending-label">Pending</span>'}</div></article>`).join('')}</div>
+        <div class="upload-footer"><p>${state.folder ? `Destination: <strong>${escapeHtml(state.folder.name)}</strong>` : 'Choose an output folder above to save these PDFs to Drive.'}<span>${state.uploadStarted ? 'Keep this tab open to preserve upload progress and retry safely.' : 'Files use numbered names. Student matching comes in Part II.'}</span></p>
+        <button id="upload" class="btn btn-primary" ${disabled(Boolean(busy) || !state.folder || allUploaded || !state.connected)}>${busy === 'upload' ? 'Saving to Drive…' : allUploaded ? 'All files saved' : state.uploadStarted ? 'Retry remaining uploads' : `Save ${files.length} PDFs to Drive`}</button></div>
+      </section>` : ''}
+      ${!pages.length ? `<section class="how-it-works"><div class="qr-symbol" aria-hidden="true">▦</div><div><h2>A small marker does the sorting.</h2><p>A QR code marks the beginning of a test. We keep each front page and all pages after it together, right up to the next QR code. The code’s contents don’t matter.</p></div></section>` : ''}
+      <footer class="site-footer"><span>PDF processing happens in your browser.</span><span>Part I of III · Slice → Match → Draft</span></footer>
+    </main>`;
+}
+
+function formatSize(bytes: number): string { return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`; }
