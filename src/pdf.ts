@@ -145,3 +145,29 @@ export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, c
     if (signal.aborted) canvas.width = canvas.height = 0;
   }
 }
+
+/** Name field: right half of the first page, top quarter. */
+export async function renderNameCrop(bytes: Uint8Array, signal: AbortSignal): Promise<string> {
+  signal.throwIfAborted();
+  const loading = getDocument({ data: bytes.slice() });
+  const abort = () => { void loading.destroy(); };
+  loading.onPassword = abort;
+  signal.addEventListener('abort', abort, { once: true });
+  const canvas = document.createElement('canvas');
+  try {
+    const pdf = await loading.promise;
+    const page = await pdf.getPage(1);
+    const original = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: 2000 / Math.max(original.width, original.height) });
+    canvas.width = Math.ceil(viewport.width * .5);
+    canvas.height = Math.ceil(viewport.height * .25);
+    await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport, transform: [1, 0, 0, 1, -viewport.width * .5, 0] }).promise;
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Could not render the name area.')), 'image/png'));
+    signal.throwIfAborted();
+    return URL.createObjectURL(blob);
+  } finally {
+    canvas.width = canvas.height = 0;
+    signal.removeEventListener('abort', abort);
+    await loading.destroy();
+  }
+}

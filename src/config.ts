@@ -4,6 +4,8 @@ export const googleConfig = {
   appId: (import.meta.env.VITE_GOOGLE_APP_ID as string | undefined)?.trim(),
 };
 
+export const draftsScope = 'https://www.googleapis.com/auth/gmail.compose';
+export const matchingScope = 'https://www.googleapis.com/auth/drive';
 export const driveScope = 'https://www.googleapis.com/auth/drive.file';
 export const pdfMimeType = 'application/pdf';
 export const folderMimeType = 'application/vnd.google-apps.folder';

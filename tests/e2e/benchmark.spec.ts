@@ -1,4 +1,5 @@
 import { test } from '@playwright/test';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { mockGoogleUi } from './googleMock';
 
@@ -6,7 +7,7 @@ test('scanner benchmark', async ({ page }) => {
   test.skip(!process.env.SCAN_BENCHMARK, 'Opt-in local benchmark');
   await mockGoogleUi(page);
   await page.goto('/');
-  const bytes = (await readFile('20260911_142302_005443.pdf')).toString('base64');
+  const bytes = (await readFile(existsSync('resources/example_lzk.pdf') ? 'resources/example_lzk.pdf' : '20260911_142302_005443.pdf')).toString('base64');
   for (const threads of [1, 2, 4]) {
     const result = await page.evaluate(async ({ bytes, threads }) => {
       const modulePath = '/src/pdf.ts';

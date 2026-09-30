@@ -22,10 +22,11 @@ export async function mockGoogleUi(page: Page, manualSelection = false): Promise
         if (!this.relayUrl || new URL(this.relayUrl).origin !== location.origin) throw new Error('Picker needs a same-origin relay URL.');
         window.__mockPickerRelayUrl = this.relayUrl;
         const folder = this.title.includes('folder');
-        const item = { id: folder ? 'destination-folder' : 'source-pdf',
-          name: folder ? 'Physics class' : 'Drive exam.pdf',
-          mimeType: folder ? 'application/vnd.google-apps.folder' : 'application/pdf' };
-        if (this.selectableMimeTypes !== item.mimeType) throw new Error('Picker must explicitly allow the selected MIME type.');
+        const csv = this.title.includes('CSV');
+        const item = { id: folder ? 'destination-folder' : csv ? 'students-csv' : 'source-pdf',
+          name: folder ? 'Physics class' : csv ? 'students.csv' : 'Drive exam.pdf',
+          mimeType: folder ? 'application/vnd.google-apps.folder' : csv ? 'text/csv' : 'application/pdf' };
+        if (!this.selectableMimeTypes.split(',').includes(item.mimeType)) throw new Error('Picker must explicitly allow the selected MIME type.');
         if (folder && !this.views.every(view => view.selectFolders)) throw new Error('Folder selection must be enabled in every view.');
         if (!${manualSelection}) {
           setTimeout(() => this.callback({ action: 'picked', docs: [item] }), 0);
@@ -59,7 +60,7 @@ export async function mockGoogleUi(page: Page, manualSelection = false): Promise
   await page.route('https://accounts.google.com/gsi/client', route => route.fulfill({ contentType: 'application/javascript', body: `
     window.google = window.google || {};
     window.google.accounts = { oauth2: {
-      initTokenClient: options => ({ requestAccessToken: () => options.callback({ access_token: 'browser-test-token', expires_in: 3600 }) }),
+      initTokenClient: options => ({ requestAccessToken: overrides => options.callback({ access_token: 'browser-test-token', expires_in: 3600, scope: overrides?.scope || options.scope }) }),
       revoke: (token, done) => done(),
     } };
   ` }));

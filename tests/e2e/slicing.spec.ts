@@ -5,7 +5,7 @@ import path from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import { mockGoogleUi } from './googleMock';
 
-const samplePath = path.resolve('20260911_142302_005443.pdf');
+const samplePath = path.resolve(existsSync('resources/example_lzk.pdf') ? 'resources/example_lzk.pdf' : '20260911_142302_005443.pdf');
 test.beforeEach(async ({ page }) => { await mockGoogleUi(page); });
 
 async function selectLocal(page: Page, buffer: Buffer, name = 'exam.pdf') {

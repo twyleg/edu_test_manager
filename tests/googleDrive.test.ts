@@ -103,3 +103,25 @@ describe('Drive download progress', () => {
     await expect(authorizedDrive().downloadPdf(item, new AbortController().signal)).rejects.toThrow('PDF download failed. Check your connection and retry.');
   });
 });
+
+describe('matching Drive operations', () => {
+  it('loads all pages of a folder listing', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({ files: [{ id: 'a' }], nextPageToken: 'next' }))
+      .mockResolvedValueOnce(json({ files: [{ id: 'b' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await authorizedDrive().listFolderPdfs("folder'quoted")).toEqual([{ id: 'a' }, { id: 'b' }]);
+    const first = new URL(fetchMock.mock.calls[0][0]);
+    expect(first.searchParams.get('q')).toContain("'folder\\'quoted' in parents");
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('pageToken')).toBe('next');
+  });
+  it('rejects incomplete listings rather than silently skipping exams', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ files: [], incompleteSearch: true })));
+    await expect(authorizedDrive().listFolderPdfs('folder')).rejects.toThrow('incomplete');
+  });
+  it('does not rename when another file already has the target name', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(json({ files: [{ id: 'a', name: 'exam.pdf' }, { id: 'b', name: 'Müller_Anna.pdf' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(authorizedDrive().renameExam({ id: 'a', name: 'exam.pdf', mimeType: 'application/pdf' }, 'folder', 'Müller_Anna.pdf')).rejects.toThrow('already named');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

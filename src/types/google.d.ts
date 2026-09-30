@@ -29,7 +29,7 @@ declare global {
 
   interface TokenClient {
     callback: (response: TokenResponse) => void;
-    requestAccessToken(options?: { prompt?: string }): void;
+    requestAccessToken(options?: { prompt?: string; scope?: string }): void;
   }
 
   interface TokenResponse {

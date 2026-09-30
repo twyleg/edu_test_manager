@@ -1,9 +1,13 @@
-import { driveScope, folderMimeType, googleConfig, getGoogleConfigError, hasGoogleConfig, pdfMimeType } from './config';
+import { draftsScope, matchingScope, driveScope, folderMimeType, googleConfig, getGoogleConfigError, hasGoogleConfig, pdfMimeType } from './config';
 import type { DriveItem } from './types';
 
+export class GoogleHttpError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 const tokenStorageKey = 'edu-test-manager-token';
-interface CachedToken { accessToken: string; expiresAt: number }
-type PickerKind = 'pdf' | 'folder';
+interface CachedToken { accessToken: string; expiresAt: number; scope?: string }
+type PickerKind = 'pdf' | 'folder' | 'csv';
 interface Callbacks {
   onConnection: (connected: boolean) => void;
   onError: (message: string) => void;
@@ -18,6 +22,26 @@ export class GoogleDrive {
   private callbacks?: Callbacks;
 
   get connected(): boolean { return Boolean(this.token && this.token.expiresAt > Date.now()); }
+
+  get matchingAccess(): boolean { return this.connected && Boolean(this.token?.scope?.split(' ').includes(matchingScope)); }
+
+  get draftsAccess(): boolean { return this.connected && Boolean(this.token?.scope?.split(' ').includes(draftsScope)); }
+
+  connectDrafts(): void {
+    if (!this.client) throw new Error('Google sign-in is not ready.');
+    this.client.requestAccessToken({ scope: `${driveScope} ${matchingScope} ${draftsScope}`, prompt: 'consent' });
+  }
+
+  /** Restricted to draft operations; no send endpoint is exposed. */
+  async gmailRequest(path: 'profile' | 'drafts' | `drafts?${string}`, init: RequestInit = {}): Promise<Response> {
+    if (!this.draftsAccess) throw new GoogleHttpError('Enable Gmail drafts access, then retry.', 401);
+    return this.request(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, init);
+  }
+
+  connectMatching(): void {
+    if (!this.client) throw new Error('Google sign-in is not ready.');
+    this.client.requestAccessToken({ scope: `${driveScope} ${matchingScope}`, prompt: 'consent' });
+  }
 
   async initialize(callbacks: Callbacks): Promise<void> {
     this.callbacks = callbacks;
@@ -39,7 +63,7 @@ export class GoogleDrive {
           callbacks.onError(response.error_description || response.error || 'Google authorization failed.');
           return;
         }
-        this.token = { accessToken: response.access_token,
+        this.token = { accessToken: response.access_token, scope: response.scope,
           expiresAt: Date.now() + Number(response.expires_in ?? 3600) * 1000 - 60000 };
         try { sessionStorage.setItem(tokenStorageKey, JSON.stringify(this.token)); } catch { /* Memory-only fallback. */ }
         callbacks.onConnection(true);
@@ -78,20 +102,21 @@ export class GoogleDrive {
     if (configError) throw new Error(configError);
     if (!this.connected) { this.pendingPicker = kind; this.connect(); return; }
     const picker = window.google.picker;
+    const mimeTypes = kind === 'folder' ? folderMimeType : kind === 'pdf' ? pdfMimeType : 'text/csv,application/csv,text/plain,application/vnd.ms-excel,application/octet-stream';
     // Picker defaults to /favicon.ico for its parent-side RPC relay. Serve a
     // real same-origin HTML document instead of relying on a missing favicon.
     const relayUrl = new URL(`${import.meta.env.BASE_URL}google-picker-relay.html`, window.location.origin).href;
     // Deliberately log only lifecycle events, never tokens, document IDs or names.
     console.info('[Drive Picker] Opening', { kind, origin: window.location.origin, embedded: window.self !== window.top });
-    const makeView = () => new picker.DocsView(kind === 'pdf' ? picker.ViewId.DOCS : picker.ViewId.FOLDERS)
+    const makeView = () => new picker.DocsView(kind === 'folder' ? picker.ViewId.FOLDERS : picker.ViewId.DOCS)
       .setIncludeFolders(true).setSelectFolderEnabled(kind === 'folder')
-      .setMimeTypes(kind === 'pdf' ? pdfMimeType : folderMimeType).setMode(picker.DocsViewMode.LIST);
+      .setMimeTypes(mimeTypes).setMode(picker.DocsViewMode.LIST);
     const builder = new picker.PickerBuilder()
-      .setTitle(kind === 'pdf' ? 'Choose an exam PDF' : 'Choose an output folder')
+      .setTitle(kind === 'pdf' ? 'Choose an exam PDF' : kind === 'csv' ? 'Choose a student CSV' : 'Choose an output folder')
       .setDeveloperKey(googleConfig.apiKey!).setAppId(googleConfig.appId!)
       .setOAuthToken(this.token!.accessToken).setOrigin(window.location.origin)
       .setRelayUrl(relayUrl)
-      .setSelectableMimeTypes(kind === 'pdf' ? pdfMimeType : folderMimeType);
+      .setSelectableMimeTypes(mimeTypes);
     if (kind === 'pdf') {
       // No parent restriction: expose Google's PDF listing across folders.
       // RECENTLY_PICKED is deprecated; listing order is controlled by Picker.
@@ -123,8 +148,8 @@ export class GoogleDrive {
           }
           const item = { id: String(doc[picker.Document.ID] || ''), name: String(doc[picker.Document.NAME] || ''),
             mimeType: String(doc[picker.Document.MIME_TYPE] || '') };
-          if (!item.id || item.mimeType !== (kind === 'pdf' ? pdfMimeType : folderMimeType)) {
-            this.callbacks?.onError(kind === 'pdf' ? 'Please select a PDF file.' : 'Please select a folder.');
+          if (!item.id || (kind === 'csv' ? !/\.csv$/i.test(item.name) : item.mimeType !== (kind === 'pdf' ? pdfMimeType : folderMimeType))) {
+            this.callbacks?.onError(kind === 'pdf' ? 'Please select a PDF file.' : kind === 'csv' ? 'Please select a CSV file.' : 'Please select a folder.');
             return;
           }
           this.callbacks?.onPick(kind, item);
@@ -195,6 +220,44 @@ export class GoogleDrive {
     }
   }
 
+  async downloadCsv(item: DriveItem, signal: AbortSignal): Promise<string> {
+    const response = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}?alt=media&supportsAllDrives=true`, { signal });
+    const bytes = await response.arrayBuffer();
+    signal.throwIfAborted();
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+    catch { return new TextDecoder('windows-1252').decode(bytes); }
+  }
+
+  async listFolderPdfs(folderId: string, signal?: AbortSignal): Promise<DriveItem[]> {
+    const files: DriveItem[] = [];
+    let pageToken = '';
+    do {
+      const escaped = folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      const params = new URLSearchParams({ q: `'${escaped}' in parents and trashed = false and mimeType = 'application/pdf'`,
+        fields: 'nextPageToken,incompleteSearch,files(id,name,mimeType)', pageSize: '1000', orderBy: 'name_natural',
+        supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', ...(pageToken ? { pageToken } : {}) });
+      const response = await this.request(`https://www.googleapis.com/drive/v3/files?${params}`, { signal });
+      const data = await response.json() as { files?: DriveItem[]; nextPageToken?: string; incompleteSearch?: boolean };
+      if (data.incompleteSearch) throw new Error('Drive returned an incomplete folder listing. Please retry.');
+      files.push(...(data.files || []));
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+    return files;
+  }
+
+  async renameExam(item: DriveItem, folderId: string, name: string): Promise<void> {
+    // Recheck for collisions just before writing. Drive allows duplicate names.
+    const siblings = await this.listFolderPdfs(folderId);
+    if (!siblings.some(file => file.id === item.id)) throw new Error('This exam is no longer in the selected folder. Reload the folder.');
+    if (siblings.some(file => file.id !== item.id && file.name.normalize('NFC').toLocaleLowerCase() === name.normalize('NFC').toLocaleLowerCase())) {
+      throw new Error(`Another exam is already named “${name}”. Choose a different student or resolve the duplicate in Drive.`);
+    }
+    if (siblings.find(file => file.id === item.id)!.name === name) return; // Safe retry after a lost response.
+    await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}?supportsAllDrives=true&fields=id,name`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+  }
+
   async verifyFolder(item: DriveItem): Promise<void> {
     const response = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}?fields=mimeType,trashed,capabilities(canAddChildren)&supportsAllDrives=true`);
     const info = await response.json() as { mimeType: string; trashed?: boolean; capabilities?: { canAddChildren?: boolean } };
@@ -242,9 +305,10 @@ export class GoogleDrive {
   }
 
   private async request(url: string, init: RequestInit = {}, allowedStatuses: number[] = []): Promise<Response> {
+    const service = url.startsWith('https://gmail.googleapis.com/') ? 'Gmail' : 'Google Drive';
     if (!this.connected) {
       this.clearToken();
-      throw new Error('Your Google session expired. Connect Google Drive again, then retry.');
+      throw new GoogleHttpError('Your Google session expired. Connect Google Drive again, then retry.', 401);
     }
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${this.token!.accessToken}`);
@@ -252,15 +316,15 @@ export class GoogleDrive {
     try { response = await fetch(url, { ...init, headers }); }
     catch (error) {
       if (init.signal?.aborted) throw error;
-      throw new Error('Could not reach Google Drive. Check your connection and retry.');
+      throw new Error(`Could not reach ${service}. Check your connection and retry.`);
     }
     if (response.ok || allowedStatuses.includes(response.status)) return response;
     if (response.status === 401) {
       this.clearToken();
-      throw new Error('Your Google session expired. Connect Google Drive again, then retry.');
+      throw new GoogleHttpError('Your Google session expired. Connect Google Drive again, then retry.', 401);
     }
     const detail = await response.json().catch(() => null) as { error?: { message?: string } } | null;
-    throw new Error(`Google Drive (${response.status}): ${detail?.error?.message || response.statusText || 'Request failed. Please retry.'}`);
+    throw new GoogleHttpError(`${service} (${response.status}): ${detail?.error?.message || response.statusText || 'Request failed. Please retry.'}`, response.status);
   }
 }
 

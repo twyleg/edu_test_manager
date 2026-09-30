@@ -6,7 +6,7 @@ export interface AppState {
   expanded: Record<'setup' | 'review' | 'save', boolean>;
   ready: boolean;
   connected: boolean;
-  busy: '' | 'picker' | 'scan' | 'split' | 'upload' | 'folder';
+  busy: '' | 'picker' | 'scan' | 'split' | 'upload' | 'folder' | 'match' | 'drafts';
   source?: DriveItem;
   localFile?: File;
   folder?: DriveItem;
@@ -34,7 +34,7 @@ const icon = (kind: 'file' | 'folder' | 'cut' | 'zoom') => {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind]}</svg>`;
 };
 
-export function renderApp(state: AppState): string {
+export function renderApp(state: AppState, matchingPanel = '', draftsPanel = ''): string {
   const { busy, pages, files } = state;
   const processing = busy === 'scan' || busy === 'split' || busy === 'upload';
   const locked = Boolean(busy || state.uploadStarted);
@@ -66,16 +66,13 @@ export function renderApp(state: AppState): string {
     </div></header>
     <main class="shell">
       <nav class="task-tabs" role="tablist" aria-label="Tasks">
-        ${(['slice', 'match', 'drafts'] as const).map((task, index) => `<button id="task-${task}" role="tab" aria-selected="${state.task === task}" aria-controls="panel-${task}" tabindex="${state.task === task ? 0 : -1}" data-task="${task}" ${disabled(Boolean(busy))}>${['Slice exams', 'Match students', 'Prepare drafts'][index]}${task !== 'slice' ? '<small>Coming soon</small>' : ''}</button>`).join('')}
+        ${(['slice', 'match', 'drafts'] as const).map((task, index) => `<button id="task-${task}" role="tab" aria-selected="${state.task === task}" aria-controls="panel-${task}" tabindex="${state.task === task ? 0 : -1}" data-task="${task}" ${disabled(Boolean(busy))}>${['Slice exams', 'Match students', 'Prepare drafts'][index]}</button>`).join('')}
       </nav>
-      ${state.task !== 'slice' ? `<section id="panel-${state.task}" role="tabpanel" aria-labelledby="task-${state.task}" tabindex="0" class="task-placeholder workspace-panel">
-        <p class="eyebrow">INDEPENDENT TASK · COMING SOON</p><h1>${state.task === 'match' ? 'Match students' : 'Prepare drafts'}</h1>
-        <p>${state.task === 'match' ? 'Start here with a folder of already-sliced exams and a student CSV list. Match each exam to a student, even if you sliced the files in an earlier session.' : 'Start here with exams already matched to students and their email addresses. Prepare email drafts for manual review before sending.'}</p>
-        <p>This task is not implemented yet. Your current Slice exams batch stays available while you switch tabs.</p>
-      </section>` : ''}
+      <div id="error" role="alert" ${state.error ? '' : 'hidden'} class="alert alert-danger">${escapeHtml(state.error)}</div>
+      ${state.task === 'match' ? matchingPanel : ''}
+      ${state.task === 'drafts' ? draftsPanel : ''}
       <div id="panel-slice" role="tabpanel" aria-labelledby="task-slice" ${state.task === 'slice' ? '' : 'hidden'}>
       ${!hasGoogleConfig() ? `<aside class="setup-note" role="alert"><strong>Check your Google Drive configuration.</strong> ${escapeHtml(getGoogleConfigError()!)} See the README for setup. You can try slicing a local PDF below.</aside>` : ''}
-      <div id="error" role="alert" ${state.error ? '' : 'hidden'} class="alert alert-danger">${escapeHtml(state.error)}</div>
       ${pages.length ? `<div class="batch-actions"><button id="reset" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy))}>Start a new batch</button></div>` : ''}
       ${subtask('setup', 1, 'Choose files & scan', pages.length ? `${pages.length} pages scanned · ${selected}` : selected || 'Choose an exam PDF and its output folder', true, busy === 'scan')}
       <div aria-label="PDF selection">

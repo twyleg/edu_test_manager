@@ -11,7 +11,7 @@ test('independent task tabs preserve a batch and subtasks advance on completion'
   await expect(page.getByRole('tabpanel')).toContainText('folder of already-sliced exams');
   await page.keyboard.press('ArrowRight');
   await expect(page.getByRole('tab', { name: 'Prepare drafts' })).toBeFocused();
-  await expect(page.getByRole('tabpanel')).toContainText('not implemented yet');
+  await expect(page.getByRole('tabpanel')).toContainText('Create a Gmail draft');
   await page.keyboard.press('Home');
   const pdf = await PDFDocument.create();
   pdf.addPage();

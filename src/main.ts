@@ -1,5 +1,7 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles/main.css';
+import { DraftTask } from './drafts';
+import { MatchingTask } from './matching';
 import { GoogleDrive } from './googleDrive';
 import { openPagePreview } from './pagePreview';
 import { openNewFolderDialog } from './folderDialog';
@@ -14,10 +16,13 @@ const state: AppState = { task: 'slice', expanded: { setup: true, review: false,
   uploadStarted: false, message: '', error: '', progress: 0, scanThreads: 2 };
 let sourceBytes: Uint8Array | undefined;
 let controller: AbortController | undefined;
+let pickerTask: 'slice' | 'match' | 'drafts' = 'slice';
+const matching = new MatchingTask(drive, render, busy => { state.busy = busy ? 'match' : ''; });
+const drafts = new DraftTask(drive, render, busy => { state.busy = busy ? 'drafts' : ''; });
 
 function render(): void {
   const focused = document.activeElement?.id;
-  app.innerHTML = renderApp(state);
+  app.innerHTML = renderApp(state, state.task === 'match' ? matching.render(state.ready && hasGoogleConfig()) : '', state.task === 'drafts' ? drafts.render(state.ready && hasGoogleConfig()) : '');
   if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
 }
 // Keep the existing bar mounted so chunk updates do not restart its animation
@@ -168,10 +173,25 @@ app.addEventListener('click', event => {
   try {
     if (target.dataset.task) {
       state.task = target.dataset.task as AppState['task'];
+      if (state.task === 'match') matching.prefill(state.folder);
+      if (state.task === 'drafts') drafts.prefill(matching.folder || state.folder, matching.csv);
+      state.error = '';
       render();
       document.getElementById(`task-${state.task}`)?.focus();
       return;
     }
+    if (target.id === 'draft-folder' || target.id === 'draft-csv') {
+      pickerTask = 'drafts'; state.busy = 'picker'; state.error = ''; render();
+      drafts.pick(target.id === 'draft-folder' ? 'folder' : 'csv');
+      return;
+    }
+    if (state.task === 'drafts' && drafts.handle(target.id)) return;
+    if (target.id === 'match-folder' || target.id === 'match-csv') {
+      pickerTask = 'match'; state.busy = 'picker'; state.error = ''; render();
+      matching.pick(target.id === 'match-folder' ? 'folder' : 'csv');
+      return;
+    }
+    if (state.task === 'match' && matching.handle(target.id)) return;
     if (target.dataset.subtask) {
       const key = target.dataset.subtask as keyof AppState['expanded'];
       state.expanded[key] = !state.expanded[key];
@@ -201,10 +221,11 @@ app.addEventListener('click', event => {
     switch (target.id) {
       case 'connect':
         if (drive.connected) {
-          drive.disconnect(); clearScan(); state.source = state.folder = state.localFile = undefined; render();
+          drive.disconnect(); drafts.reset(); matching.reset(); clearScan(); state.source = state.folder = state.localFile = undefined; render();
         } else drive.connect();
         break;
       case 'choose-pdf': case 'choose-folder':
+        pickerTask = 'slice';
         state.busy = 'picker'; state.error = ''; render();
         drive.openPicker(target.id === 'choose-pdf' ? 'pdf' : 'folder');
         break;
@@ -250,8 +271,15 @@ app.addEventListener('drop', event => {
 });
 app.addEventListener('dragend', () => { draggedPage = undefined; });
 
+app.addEventListener('input', event => {
+  const input = event.target as HTMLInputElement;
+  if (input.id === 'student-search') matching.input(input.value);
+  if (state.task === 'drafts' && ['draft-subject', 'draft-body', 'draft-tags'].includes(input.id)) drafts.input(input.id, input.value);
+});
+
 app.addEventListener('keydown', event => {
   const target = event.target as HTMLElement;
+  if (target.id === 'student-search') { matching.keydown(event); return; }
   if (!target.dataset.task || state.busy) return;
   const tabs = ['slice', 'match', 'drafts'];
   const index = tabs.indexOf(state.task);
@@ -263,6 +291,14 @@ app.addEventListener('keydown', event => {
 
 app.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
+  if (input.dataset.draftFile !== undefined) {
+    if (!state.busy) drafts.select(Number(input.dataset.draftFile), input.checked);
+    return;
+  }
+  if (input.dataset.matchFile !== undefined) {
+    if (!state.busy) matching.selectFile(input.dataset.matchFile, input.checked);
+    return;
+  }
   if (state.busy || state.uploadStarted) return;
   if (input.id === 'scan-threads') {
     const value = input.valueAsNumber;
@@ -287,7 +323,7 @@ app.addEventListener('change', event => {
 });
 
 window.addEventListener('beforeunload', event => {
-  if (state.busy || (state.uploadStarted && state.files.some(file => !file.uploaded))) event.preventDefault();
+  if (state.busy || drafts.hasIncompleteBatch || (state.uploadStarted && state.files.some(file => !file.uploaded))) event.preventDefault();
 });
 
 render();
@@ -297,6 +333,8 @@ if (hasGoogleConfig()) {
     onError: message => { state.busy = ''; reportError(new Error(message)); },
     onPickerClosed: () => { state.busy = ''; render(); },
     onPick: (kind, item) => {
+      if (pickerTask === 'drafts') { drafts.accept(item); render(); return; }
+      if (pickerTask === 'match') { matching.accept(item); render(); return; }
       if (kind === 'pdf') { clearScan(); state.localFile = undefined; state.source = item; }
       else { state.folder = item; state.error = ''; }
       render();
