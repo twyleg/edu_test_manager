@@ -136,9 +136,63 @@ export class GoogleDrive {
       }).build().setVisible(true);
   }
 
-  async downloadPdf(item: DriveItem, signal: AbortSignal): Promise<Uint8Array> {
-    const response = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}?alt=media&supportsAllDrives=true`, { signal });
-    return new Uint8Array(await response.arrayBuffer());
+  async downloadPdf(item: DriveItem, signal: AbortSignal, onProgress?: (received: number, total?: number) => void): Promise<Uint8Array> {
+    signal.throwIfAborted();
+    onProgress?.(0);
+    const fileUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}`;
+    const metadataResponse = await this.request(`${fileUrl}?fields=size&supportsAllDrives=true`, { signal });
+    const metadata = await metadataResponse.json() as { size?: string };
+    const fileSize = Number(metadata.size);
+    const metadataTotal = Number.isSafeInteger(fileSize) && fileSize > 0 ? fileSize : undefined;
+    signal.throwIfAborted();
+    onProgress?.(0, metadataTotal);
+    const response = await this.request(`${fileUrl}?alt=media&supportsAllDrives=true`, { signal });
+    // Drive metadata gives the actual PDF size even when the media response
+    // omits Content-Length or compresses the transfer. Headers are a fallback.
+    const length = Number(response.headers.get('Content-Length'));
+    const encoding = response.headers.get('Content-Encoding');
+    let total = metadataTotal ?? (Number.isSafeInteger(length) && length > 0 && (!encoding || encoding === 'identity') ? length : undefined);
+    onProgress?.(0, total);
+    if (!response.body) {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      signal.throwIfAborted();
+      onProgress?.(bytes.length, bytes.length);
+      return bytes;
+    }
+    const reader = response.body.getReader();
+    const abort = () => { void reader.cancel().catch(() => {}); };
+    signal.addEventListener('abort', abort, { once: true });
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    let lastReport = 0;
+    try {
+      while (true) {
+        signal.throwIfAborted();
+        const { done, value } = await reader.read();
+        signal.throwIfAborted();
+        if (done) break;
+        chunks.push(value);
+        received += value.length;
+        if (total !== undefined && received > total) total = undefined;
+        const now = performance.now();
+        if (now - lastReport >= 100) {
+          onProgress?.(received, total);
+          lastReport = now;
+        }
+      }
+      const bytes = new Uint8Array(received);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      onProgress?.(received, received);
+      return bytes;
+    } catch (error) {
+      await reader.cancel().catch(() => {});
+      signal.throwIfAborted();
+      throw new Error('PDF download failed. Check your connection and retry. ' + (error instanceof Error ? error.message : ''));
+    } finally {
+      signal.removeEventListener('abort', abort);
+      reader.releaseLock();
+    }
   }
 
   async verifyFolder(item: DriveItem): Promise<void> {

@@ -1,6 +1,6 @@
 # EDU Test Manager
 
-Part I of the exam workflow: choose a scanned PDF and output folder in Google Drive, detect QR-marked front pages, review the groups, and save a separate PDF for each exam.
+The **Slice exams** task lets you choose a scanned PDF and output folder in Google Drive, detect QR-marked front pages, review the groups, and save a separate PDF for each exam.
 
 Built with Vite, TypeScript and Bootstrap, following [playground_googledrive_filepicker](https://github.com/twyleg/playground_googledrive_filepicker). Google Identity Services handles sign-in; Google Picker selects PDFs and folders in My Drive or shared drives. PDF.js renders pages for jsQR detection, and pdf-lib copies the original pages into the output files. There is no application backend.
 
@@ -38,7 +38,25 @@ Restart Vite after changing these values. They are public browser configuration,
 
 For deployment, run `npm run build`, host `dist/` on HTTPS, add the production origin to the OAuth client and update the API key’s allowed referrers. Serve the bundled PDF.js worker as a JavaScript module. Also serve `google-picker-relay.html` as a static HTML file on the app’s origin; do not redirect it to sign-in or rewrite it to the app entry point. Picker uses this empty page for its parent-side messaging relay instead of its default `/favicon.ico` URL. `npm run preview` serves the production build locally; authorize that origin too if testing Google sign-in there.
 
-## Workflow
+## Tasks and subtasks
+
+The application has three independent **Tasks**, shown as tabs. They are entry points, not mandatory sequential steps:
+
+- **Slice exams**: split a combined scan into individual exam PDFs. This task is implemented and can be completed without matching students or preparing email drafts.
+- **Match students** (planned): start directly with a Google Drive folder containing already-sliced exams and a student CSV list. Match exams to students using their handwritten names. Slicing need not happen in the same session or in this application.
+- **Prepare drafts** (planned): start with exams already matched to students and their email addresses, then create email drafts for manual review. The saved matching format and handoff will be defined when those tasks are implemented.
+
+The planned tasks currently show informational tab panels. Switching tabs preserves the current in-memory slicing batch; this is not persistence across reloads. Eventually, each task will load its own required inputs, so users can return to existing work independently.
+
+Actions within a task are called **Subtasks**. Slice exams has three vertically stacked, foldable subtasks:
+
+1. **Choose files & scan**: choose the combined PDF, destination folder and scan settings, then scan.
+2. **Review the split**: inspect the candidate exams, correct front pages and prepare individual PDFs.
+3. **Save individual PDFs**: preview, download or save the prepared files to Drive.
+
+During downloading, scanning, preparation or upload, the active banner is muted and a floating progress island at the bottom of the viewport receives focus. It stays visible while scrolling, then returns to an inline status message when processing ends. Drive downloads first request the PDF size from Drive metadata, then show a growing bar and percentage based on received bytes—even when the download response omits Content-Length. If neither metadata nor response headers provide a usable size, an activity bar and received-byte count remain the fallback. Downloads can be cancelled with Cancel scan. Successful completion folds that subtask and opens the next; after saving to Drive, the final subtask folds with its saved-file count in the header. Completed panels can be reopened to inspect their contents. Errors and cancellation keep the relevant panel open for correction or retry. Unavailable subtasks remain folded until their inputs exist. Starting a new batch returns to the first subtask.
+
+## Slice exams workflow
 
 1. Connect Google Drive and choose the combined **PDF**. The picker opens with a PDF-wide listing across folders; use Google’s date sorting to find recent scans. My Drive root browsing and Shared drives are also available. Google controls the listing order; the app does not use the deprecated `RECENTLY_PICKED` view or keep a separate recent-files history.
 2. Choose a writable **output folder**. In Picker, single-click the folder row and click **Select**. Double-clicking opens the folder; to select that folder, return to its parent and select its row. Folder selection and downloads support shared drives subject to your Google account’s permissions.
@@ -46,7 +64,11 @@ For deployment, run `npm run build`, host `dist/` on HTTPS, add the production o
    - After connecting Drive, click **New folder** beside the selector to create a folder inside the selected directory, or in My Drive when no directory is selected. Enter its name and click **Create folder**; the new folder becomes the output destination. Creation is disabled after uploads begin.
 3. Click **Scan PDF**. Only the full-width top 20% of each page is rendered for QR detection, with a higher-resolution retry for small codes. **Scan threads** defaults to 2 and accepts 1–8: independent Web Workers decode QR codes concurrently while PDF.js renders pages. Higher counts use more memory and may not be faster on every device. Full-page thumbnails are rendered separately at low resolution. The QR payload is never used or stored. Scan progress is shown and scanning can be cancelled.
 4. Review the page thumbnails. Each candidate exam has its own row with a page range; long rows scroll horizontally. Front-page checkbox changes immediately split or merge the rows. The magnifier beside each checkbox opens a detailed full-page view; close it with **Close** or **Escape**. Each checked **Front page** begins an exam; subsequent pages belong to that exam until the next checked page. Correct any missed or unwanted markers. No-marker scans and unmarked leading pages require correction, so no pages are silently dropped.
-5. Click **Prepare PDFs** to copy the page groups into individual files. Preview or download them before uploading. Page order, page dimensions and original page contents are preserved; output PDFs are not screenshots.
+   - **Skip page** omits a page from the output while keeping its preview dimmed. Front pages cannot be skipped; marking a skipped page as a front page includes it again.
+   - **Rotate left/right** changes a page in 90° increments, including its enlarged preview and output PDF. Existing PDF rotation is preserved and combined with the edit.
+   - Drag continuation pages onto another continuation page within the same exam to reorder them, or use the earlier/later arrow buttons (also available on touch screens and with a keyboard). Front pages remain first; moving between exams is not allowed. Preview page numbers always identify original source pages.
+   - Edits invalidate prepared PDFs. Prepare them again to apply changes. All editing is locked once uploads begin. Edits remain in memory only; the source PDF is never changed.
+5. Click **Prepare PDFs** to copy the page groups into individual files. Preview or download them before uploading. Your chosen order, inclusion and rotation are applied; original page dimensions and contents are preserved; output PDFs are not screenshots.
 6. Click **Save PDFs to Drive**. Files are created in the selected folder with names such as `Physics_exam-001_pages-1-2.pdf`. The original input is not modified. Each uploaded file gets a link to Drive.
 
 If upload fails, reconnect if required and click **Retry remaining uploads**. Successful files are skipped. Pre-generated Drive file IDs let retries check for a completed upload even if its response was lost. Once uploads begin, the input, split points and destination stay fixed; use **Start a new batch** to begin another run. A new batch creates new files even if the same names already exist in Drive.

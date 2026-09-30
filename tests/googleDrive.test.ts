@@ -65,3 +65,41 @@ describe('Drive uploads', () => {
     await expect(authorizedDrive().generateFileId()).rejects.toThrow('Google Drive (403): Storage quota exceeded');
   });
 });
+
+describe('Drive download progress', () => {
+  const item = { id: 'source', name: 'exam.pdf', mimeType: 'application/pdf' };
+  beforeEach(() => { vi.spyOn(performance, 'now').mockImplementation((() => { let now = 0; return () => now += 150; })()); });
+
+  it.each([true, false])('streams exact bytes with known size: %s', async known => {
+    let index = 0;
+    const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4, 5])];
+    const stream = new ReadableStream<Uint8Array>({ pull(controller) {
+      if (index < chunks.length) controller.enqueue(chunks[index++]); else controller.close();
+    } });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json(known ? { size: '5' } : {})).mockResolvedValueOnce(new Response(stream)));
+    const progress = vi.fn();
+    const bytes = await authorizedDrive().downloadPdf(item, new AbortController().signal, progress);
+    expect(Array.from(bytes)).toEqual([1, 2, 3, 4, 5]);
+    expect(progress).toHaveBeenCalledWith(2, known ? 5 : undefined);
+    expect(progress).toHaveBeenLastCalledWith(5, 5);
+  });
+
+  it('cancels a pending streamed download without returning partial PDF bytes', async () => {
+    const cancel = vi.fn();
+    const controller = new AbortController();
+    const stream = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(new Uint8Array([1])); }, cancel });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({})).mockResolvedValueOnce(new Response(stream)));
+    const download = authorizedDrive().downloadPdf(item, controller.signal, received => { if (received) controller.abort(); });
+    await expect(download).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('reports interrupted downloads as retryable failures', async () => {
+    let reads = 0;
+    const stream = new ReadableStream<Uint8Array>({ pull(c) {
+      if (!reads++) c.enqueue(new Uint8Array([1])); else c.error(new Error('Connection lost'));
+    } });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({})).mockResolvedValueOnce(new Response(stream)));
+    await expect(authorizedDrive().downloadPdf(item, new AbortController().signal)).rejects.toThrow('PDF download failed. Check your connection and retry.');
+  });
+});

@@ -7,6 +7,8 @@ export interface DriveItem {
 export interface PageScan {
   pageNumber: number;
   hasQr: boolean;
+  skipped?: boolean;
+  rotation?: number;
   thumbnailUrl: string;
 }
 
@@ -16,6 +18,7 @@ export interface PageRange {
 }
 
 export interface ExamFile extends PageRange {
+  pageNumbers: number[];
   name: string;
   blob: Blob;
   previewUrl: string;

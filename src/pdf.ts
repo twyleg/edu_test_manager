@@ -1,6 +1,6 @@
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { PDFDocument } from 'pdf-lib';
+import { PDFDocument, degrees } from 'pdf-lib';
 import { QrScanner } from './qrScanner';
 import { examFilename, groupPages } from './grouping';
 import type { ExamFile, PageScan } from './types';
@@ -107,11 +107,14 @@ export async function splitPdf(bytes: Uint8Array, name: string, pages: PageScan[
   try {
     for (const [index, range] of ranges.entries()) {
       const output = await PDFDocument.create();
-      const indices = Array.from({ length: range.end - range.start + 1 }, (_, offset) => range.start - 1 + offset);
-      const copied = await output.copyPages(source, indices);
-      copied.forEach(page => output.addPage(page));
+      const selected = pages.slice(range.start - 1, range.end).filter((page, index) => index === 0 || !page.skipped);
+      const copied = await output.copyPages(source, selected.map(page => page.pageNumber - 1));
+      copied.forEach((page, index) => {
+        page.setRotation(degrees((page.getRotation().angle + (selected[index].rotation || 0)) % 360));
+        output.addPage(page);
+      });
       const blob = new Blob([new Uint8Array(await output.save())], { type: 'application/pdf' });
-      files.push({ ...range, name: examFilename(name, index, range), blob,
+      files.push({ ...range, pageNumbers: selected.map(page => page.pageNumber), name: examFilename(name, index, range), blob,
         previewUrl: URL.createObjectURL(blob), thumbnailUrl: pages[range.start - 1].thumbnailUrl, uploaded: false });
     }
     return files;
@@ -121,7 +124,7 @@ export async function splitPdf(bytes: Uint8Array, name: string, pages: PageScan[
   }
 }
 
-export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, canvas: HTMLCanvasElement, signal: AbortSignal): Promise<void> {
+export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, canvas: HTMLCanvasElement, signal: AbortSignal, rotation = 0): Promise<void> {
   signal.throwIfAborted();
   const loading = getDocument({ data: bytes.slice() });
   const abort = () => { void loading.destroy(); };
@@ -131,8 +134,8 @@ export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, c
     const pdf = await loading.promise;
     signal.throwIfAborted();
     const page = await pdf.getPage(pageNumber);
-    const original = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: 2200 / Math.max(original.width, original.height) });
+    const original = page.getViewport({ scale: 1, rotation: page.rotate + rotation });
+    const viewport = page.getViewport({ scale: 2200 / Math.max(original.width, original.height), rotation: page.rotate + rotation });
     canvas.width = Math.ceil(viewport.width);
     canvas.height = Math.ceil(viewport.height);
     await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport }).promise;

@@ -17,6 +17,9 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
     const request = route.request();
     const url = new URL(request.url());
     expect(request.headers().authorization).toBe('Bearer browser-test-token');
+    if (url.pathname.endsWith('/source-pdf') && url.searchParams.get('fields') === 'size') {
+      return route.fulfill({ json: { size: String(pdfBytes.length) } });
+    }
     if (url.pathname.endsWith('/source-pdf')) {
       expect(url.searchParams.get('alt')).toBe('media');
       return route.fulfill({ contentType: 'application/pdf', body: pdfBytes });
@@ -64,9 +67,13 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
   await page.getByRole('button', { name: 'Save 3 PDFs to Drive' }).click();
   await expect(page.getByRole('alert')).toContainText('session expired');
   await expect(page.getByRole('status')).toContainText('1 of 3 PDFs saved');
-  await expect(page.getByRole('button', { name: 'Choose Drive folder' })).toBeDisabled();
+  await expect(page.locator('#choose-folder')).toBeDisabled();
+  await expect(page.locator('#rotate-left-0')).toBeDisabled();
+  await expect(page.locator('#skip-1')).toBeDisabled();
   await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click();
   await page.getByRole('button', { name: 'Retry remaining uploads' }).click();
+  await expect(page.locator('#toggle-save')).toHaveAttribute('aria-expanded', 'false');
+  await page.locator('#toggle-save').click();
   await expect(page.getByRole('heading', { name: 'All exams saved to Drive' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Saved ↗' })).toHaveCount(3);
   expect(uploadCalls).toEqual(['generated-1', 'generated-2', 'generated-3']);

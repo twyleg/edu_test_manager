@@ -1,5 +1,5 @@
 /** Render the selected original page on demand, rather than enlarging its thumbnail. */
-export function openPagePreview(bytes: Uint8Array, pageNumber: number, triggerId: string): void {
+export function openPagePreview(bytes: Uint8Array, pageNumber: number, triggerId: string, rotation = 0): void {
   const dialog = document.createElement('dialog');
   dialog.className = 'page-preview-dialog';
   dialog.setAttribute('aria-labelledby', 'page-preview-title');
@@ -22,7 +22,7 @@ export function openPagePreview(bytes: Uint8Array, pageNumber: number, triggerId
   void (async () => {
     try {
       const { renderPagePreview } = await import('./pdf');
-      await renderPagePreview(bytes, pageNumber, canvas, controller.signal);
+      await renderPagePreview(bytes, pageNumber, canvas, controller.signal, rotation);
       if (controller.signal.aborted) return;
       status.hidden = true;
       canvas.hidden = false;

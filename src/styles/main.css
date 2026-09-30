@@ -145,3 +145,55 @@ h1 { font-size: clamp(27px, 3.2vw, 37px); font-weight: 750; letter-spacing: -1.4
 .page-preview-heading h2 { font-size: 18px; margin: 0; }
 .page-preview-body { overflow: auto; padding: 16px; }
 .page-preview-body canvas { width: 100%; height: auto; background: white; box-shadow: 0 2px 12px #14271e20; }
+
+.task-tabs { display: flex; gap: 8px; border-bottom: 1px solid #cbd6c5; padding-top: 28px; }
+.task-tabs [role=tab] { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; padding: 16px 24px; border: 1px solid transparent; border-bottom: 0; border-radius: 10px 10px 0 0; background: #edf0e8; color: #67745e; font-weight: 600; }
+.task-tabs [aria-selected=true] { background: white; border-color: #cbd6c5; color: var(--green); box-shadow: inset 0 3px var(--green); position: relative; bottom: -1px; padding-bottom: 17px; }
+.task-tabs small { font-size: 9px; font-weight: 400; }
+.task-tabs button:focus-visible, .subtask-heading button:focus-visible { outline: 2px solid var(--green); outline-offset: -4px; }
+.task-placeholder { margin-top: 32px; padding: 32px; }
+.task-placeholder p { max-width: 700px; line-height: 1.8; }
+.subtask { margin-top: 20px; }
+.subtask-heading { margin: 0; font-size: 16px; }
+.subtask-heading button { display: flex; align-items: center; gap: 14px; text-align: left; width: 100%; border: 0; background: white; color: inherit; padding: 22px 26px; }
+.subtask-heading button:disabled { color: #849080; }
+.subtask-title { flex: 1; font-weight: 700; min-width: 0; }
+.subtask-title small { display: block; font: 400 12px 'DM Sans', sans-serif; color: #7a8575; margin-top: 6px; overflow-wrap: anywhere; }
+.fold-chevron { font-size: 22px; }
+.subtask-body { border-top: 1px solid var(--line); }
+.subtask-busy { background: #e9ece7; }
+.subtask-busy .subtask-body { opacity: .48; filter: grayscale(1); pointer-events: none; }
+.subtask-busy .subtask-heading button { background: #e9ece7; }
+.subtask .review-section, .subtask .results-section { margin: 0; padding: 26px; }
+.step-heading h3 { font-size: 16px; font-weight: 750; margin: 0; letter-spacing: -.3px; }
+.batch-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.progress-active { padding: 22px 26px; background: #edf4e8; border: 1px solid #88a77c; border-radius: 10px; box-shadow: 0 3px 12px #24483d10; }
+.progress-area:focus { outline: 2px solid #73986d; outline-offset: 3px; }
+@media (max-width: 600px) {
+  .task-tabs { gap: 4px; }
+  .task-tabs [role=tab] { flex: 1; padding: 12px 7px; font-size: 11px; }
+  .task-tabs small { font-size: 8px; }
+  .subtask-heading button { padding: 18px; }
+  .subtask .review-section, .subtask .results-section { padding: 16px; }
+}
+
+.progress-island { position: fixed; z-index: 1050; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); width: min(720px, calc(100% - 32px)); margin: 0; padding: 20px 24px; border-radius: 18px; background: #f5faf1; box-shadow: 0 12px 48px #14271e33, 0 2px 8px #14271e15; }
+.progress-island .progress-caption > span { min-width: 0; overflow-wrap: anywhere; }
+.progress-island .progress-caption .btn { flex-shrink: 0; }
+body:has(.progress-island) { padding-bottom: 150px; }
+.progress-indeterminate .progress-bar { animation: progress-travel 1.5s ease-in-out infinite alternate; }
+@keyframes progress-travel { from { transform: translateX(-100%); } to { transform: translateX(285%); } }
+@media (prefers-reduced-motion: reduce) {
+  .progress-indeterminate .progress-bar { animation: none; width: 100% !important; opacity: .5; }
+}
+@media (max-width: 600px) {
+  .progress-island { padding: 16px; bottom: max(12px, env(safe-area-inset-bottom)); }
+}
+
+.page-edit-controls { border-top: 1px solid var(--line); margin-top: 9px; padding-top: 10px; }
+.page-edit-buttons { display: flex; justify-content: space-between; gap: 5px; margin-top: 10px; }
+.page-edit-buttons .btn { padding: 4px 8px; font-size: 17px; line-height: 1.2; }
+.page-skipped .page-image { opacity: .35; }
+.page-skipped { border-style: dashed; background: #f5f5f2; }
+.page-card[draggable=true] .page-image { cursor: grab; }
+.page-card[draggable=true]:active .page-image { cursor: grabbing; }

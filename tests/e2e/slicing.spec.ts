@@ -81,6 +81,7 @@ test('unmarked pages require explicit correction and preserve page order when sp
   });
   const output = await PDFDocument.load(Uint8Array.from(outputBytes));
   expect(output.getPages().map(page => page.getWidth())).toEqual([410, 420]);
+  await page.locator('#toggle-review').click();
   await page.locator('#front-1').uncheck();
   await expect(page.locator('.exam-group')).toHaveCount(1);
   await expect(page.locator('.exam-group .page-index')).toHaveText(['1', '2', '3']);

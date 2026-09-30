@@ -2,6 +2,8 @@ import { getGoogleConfigError, hasGoogleConfig } from './config';
 import type { DriveItem, ExamFile, PageScan } from './types';
 
 export interface AppState {
+  task: 'slice' | 'match' | 'drafts';
+  expanded: Record<'setup' | 'review' | 'save', boolean>;
   ready: boolean;
   connected: boolean;
   busy: '' | 'picker' | 'scan' | 'split' | 'upload' | 'folder';
@@ -14,7 +16,7 @@ export interface AppState {
   uploadStarted: boolean;
   message: string;
   error: string;
-  progress: number;
+  progress: number | null;
   scanThreads: number;
 }
 
@@ -34,6 +36,7 @@ const icon = (kind: 'file' | 'folder' | 'cut' | 'zoom') => {
 
 export function renderApp(state: AppState): string {
   const { busy, pages, files } = state;
+  const processing = busy === 'scan' || busy === 'split' || busy === 'upload';
   const locked = Boolean(busy || state.uploadStarted);
   const selected = state.localFile?.name || state.source?.name;
   const examCount = state.frontPages.filter(Boolean).length;
@@ -49,6 +52,11 @@ export function renderApp(state: AppState): string {
   const allUploaded = files.length > 0 && uploaded === files.length;
   const disabled = (condition: boolean) => condition ? 'disabled' : '';
   const googleDisabled = !state.ready || !hasGoogleConfig();
+  const subtask = (key: 'setup' | 'review' | 'save', number: number, title: string, summary: string, available: boolean, active: boolean) => `<section class="subtask workspace-panel ${active ? 'subtask-busy' : ''}" aria-busy="${active}">
+    <h2 class="subtask-heading"><button id="toggle-${key}" data-subtask="${key}" aria-expanded="${state.expanded[key]}" aria-controls="subtask-${key}" ${disabled(!available || Boolean(busy))}>
+      <span class="step-number">${number}</span><span class="subtask-title">${title}<small>${escapeHtml(summary)}</small></span><span class="fold-chevron" aria-hidden="true">${state.expanded[key] ? '⌃' : '⌄'}</span>
+    </button></h2><div id="subtask-${key}" class="subtask-body" ${state.expanded[key] ? '' : 'hidden'}>`;
+
   return `
     <header class="topbar"><div class="shell topbar-inner">
       <a class="brand" href="./"><span class="brand-mark">${icon('cut')}</span> EDU <span class="brand-light">Test Manager</span></a>
@@ -57,26 +65,32 @@ export function renderApp(state: AppState): string {
       </div>
     </div></header>
     <main class="shell">
-      <nav class="workflow" aria-label="Exam workflow">
-        <span class="workflow-current" aria-current="step"><b>01</b> Slice exams</span><span class="workflow-line"></span>
-        <span><b>02</b> Match students <small>Coming later</small></span><span class="workflow-line"></span>
-        <span><b>03</b> Prepare drafts <small>Coming later</small></span>
+      <nav class="task-tabs" role="tablist" aria-label="Tasks">
+        ${(['slice', 'match', 'drafts'] as const).map((task, index) => `<button id="task-${task}" role="tab" aria-selected="${state.task === task}" aria-controls="panel-${task}" tabindex="${state.task === task ? 0 : -1}" data-task="${task}" ${disabled(Boolean(busy))}>${['Slice exams', 'Match students', 'Prepare drafts'][index]}${task !== 'slice' ? '<small>Coming soon</small>' : ''}</button>`).join('')}
       </nav>
+      ${state.task !== 'slice' ? `<section id="panel-${state.task}" role="tabpanel" aria-labelledby="task-${state.task}" tabindex="0" class="task-placeholder workspace-panel">
+        <p class="eyebrow">INDEPENDENT TASK · COMING SOON</p><h1>${state.task === 'match' ? 'Match students' : 'Prepare drafts'}</h1>
+        <p>${state.task === 'match' ? 'Start here with a folder of already-sliced exams and a student CSV list. Match each exam to a student, even if you sliced the files in an earlier session.' : 'Start here with exams already matched to students and their email addresses. Prepare email drafts for manual review before sending.'}</p>
+        <p>This task is not implemented yet. Your current Slice exams batch stays available while you switch tabs.</p>
+      </section>` : ''}
+      <div id="panel-slice" role="tabpanel" aria-labelledby="task-slice" ${state.task === 'slice' ? '' : 'hidden'}>
       <section class="intro"><div><p class="eyebrow">LESS PAPERWORK. MORE TEACHING.</p><h1>One scan. Individual exams.</h1>
         <p class="lead-copy">Turn a stack of scanned tests into a PDF for each student. <br>Each QR-marked front page starts a new exam.</p></div>
-        <span class="part-label">PART I <span>/</span> PDF SLICING</span>
+        <span class="part-label">TASK <span>/</span> SLICE EXAMS</span>
       </section>
       ${!hasGoogleConfig() ? `<aside class="setup-note" role="alert"><strong>Check your Google Drive configuration.</strong> ${escapeHtml(getGoogleConfigError()!)} See the README for setup. You can try slicing a local PDF below.</aside>` : ''}
       <div id="error" role="alert" ${state.error ? '' : 'hidden'} class="alert alert-danger">${escapeHtml(state.error)}</div>
-      <section class="workspace-panel" aria-label="PDF selection">
+      ${pages.length ? `<div class="batch-actions"><button id="reset" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy))}>Start a new batch</button></div>` : ''}
+      ${subtask('setup', 1, 'Choose files & scan', pages.length ? `${pages.length} pages scanned · ${selected}` : selected || 'Choose an exam PDF and its output folder', true, busy === 'scan')}
+      <div aria-label="PDF selection">
         <div class="selection-grid">
-          <div class="selection-step"><div class="step-heading"><span class="step-number">1</span><h2>Choose the exam scan</h2></div>
+          <div class="selection-step"><div class="step-heading"><h3>Choose the exam scan</h3></div>
             <p>The single PDF containing all students’ tests.</p>
             <div class="file-selection ${selected ? 'has-selection' : ''}"><span class="selection-icon">${icon('file')}</span><div><strong>${selected ? escapeHtml(selected) : 'No PDF selected'}</strong><span>${selected ? state.localFile ? 'Local PDF · processed in your browser' : 'PDF from Google Drive' : 'Select a PDF from Google Drive'}</span></div></div>
             <div class="selection-actions"><button id="choose-pdf" class="btn btn-outline-primary" ${disabled(locked || googleDisabled)}>Choose PDF from Drive</button>
               <label class="local-label ${locked ? 'disabled' : ''}">or use a local PDF<input id="local-pdf" type="file" accept="application/pdf,.pdf" ${disabled(locked)} /></label></div>
           </div>
-          <div class="selection-step"><div class="step-heading"><span class="step-number">2</span><h2>Choose the output folder</h2></div>
+          <div class="selection-step"><div class="step-heading"><h3>Choose the output folder</h3></div>
             <p>Individual PDFs will be saved here in Google Drive.</p>
             <div class="file-selection ${state.folder ? 'has-selection' : ''}"><span class="selection-icon">${icon('folder')}</span><div><strong>${state.folder ? escapeHtml(state.folder.name) : 'No folder selected'}</strong><span>${state.folder ? 'Google Drive destination' : 'Choose where the sliced exams will go'}</span></div></div>
             <div class="selection-actions"><button id="choose-folder" class="btn btn-outline-primary" ${disabled(locked || googleDisabled)}>Choose Drive folder</button><button id="new-folder" class="btn btn-outline-primary" ${disabled(locked || googleDisabled || !state.connected)}>New folder</button></div>
@@ -90,37 +104,51 @@ export function renderApp(state: AppState): string {
         </div>
         <div class="panel-footer"><div><strong>Ready when you are.</strong><span>Scan for QR markers, review the split, then save your files.</span></div>
           <button id="scan" class="btn btn-primary" ${disabled(locked || !selected || pages.length > 0)}>${icon('cut')} ${busy === 'scan' ? 'Scanning…' : 'Scan PDF'}</button></div>
-      </section>
-      <div class="progress-area" ${state.message ? '' : 'hidden'}>
+      </div></div></section>
+      <div id="task-progress" tabindex="-1" class="progress-area ${processing ? 'progress-active progress-island' : ''}" ${state.message ? '' : 'hidden'}>
         <div class="progress-caption"><span role="status" aria-live="polite">${escapeHtml(state.message)}</span>${busy === 'scan' ? '<button id="cancel" class="btn btn-sm btn-outline-secondary">Cancel scan</button>' : ''}</div>
-        ${busy && busy !== 'picker' ? `<div class="progress" role="progressbar" aria-label="Processing progress" aria-valuenow="${Math.round(state.progress)}" aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:${state.progress}%"></div></div>` : ''}
+        ${processing ? `<div class="progress ${state.progress === null ? 'progress-indeterminate' : ''}" role="progressbar" aria-label="Processing progress" ${state.progress === null ? '' : `aria-valuenow="${Math.round(state.progress)}"`} aria-valuemin="0" aria-valuemax="100" aria-valuetext="${escapeHtml(state.message)}"><div class="progress-bar" style="width:${state.progress === null ? 35 : state.progress}%"></div></div>` : ''}
       </div>
+      ${subtask('review', 2, 'Review the split', pages.length ? `${pages.length} pages · ${examCount} candidate exams` : 'Available after scanning', pages.length > 0, busy === 'split')}
       ${pages.length ? `<section class="review-section" aria-labelledby="review-heading">
         <div class="section-heading"><div><p class="eyebrow">REVIEW THE SPLIT</p><h2 id="review-heading">${pages.length} page${pages.length === 1 ? '' : 's'}. ${examCount} exam${examCount === 1 ? '' : 's'}.</h2></div>
-          <button id="reset" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy))}>Start a new batch</button></div>
-        <p class="section-description">A checked page starts a new exam. All following pages belong to it until the next checked page. Each row is one candidate exam. Changing a checkbox updates the rows immediately. Use the magnifier to inspect a full page.</p>
+          </div>
+        <p class="section-description">A checked page starts a new exam. All following pages belong to it until the next checked page. Each row is one candidate exam. Changing a checkbox updates the rows immediately. Use the magnifier to inspect a full page. Skip unwanted pages, rotate them, or drag pages within an exam to reorder them (arrow buttons work too). Front pages stay first and cannot be skipped. Page numbers refer to the original scan.</p>
         <div class="exam-groups">${groups.map(group => `<section class="exam-group ${group.candidate ? '' : 'unassigned-group'}" aria-label="${group.candidate ? `Exam ${group.candidate}` : 'Unassigned pages'}">
           <header class="exam-group-heading"><h3>${group.candidate ? `Exam ${String(group.candidate).padStart(2, '0')}` : 'Unassigned pages'}</h3><span>Pages ${group.start + 1}–${group.end + 1} · ${group.end - group.start + 1} page${group.end === group.start ? '' : 's'}</span></header>
           ${!group.candidate ? '<p class="unassigned-note">Select a front page to include these leading pages in an exam.</p>' : ''}
           <div class="page-grid" tabindex="0" aria-label="${group.candidate ? `Pages of exam ${group.candidate}` : 'Unassigned page previews'}">${pages.slice(group.start, group.end + 1).map((page, offset) => {
             const index = group.start + offset;
-            return `<article class="page-card ${state.frontPages[index] ? 'front-page' : ''}">
-              <div class="page-image"><img src="${page.thumbnailUrl}" alt="Scanned page ${page.pageNumber}" loading="lazy"/><span class="page-index">${page.pageNumber}</span></div>
+            return `<article data-page-index="${index}" draggable="${!locked && group.candidate > 0 && !state.frontPages[index]}" class="page-card ${state.frontPages[index] ? 'front-page' : ''} ${page.skipped ? 'page-skipped' : ''}">
+              <div class="page-image"><img src="${page.thumbnailUrl}" alt="Scanned page ${page.pageNumber}" draggable="false" style="transform:rotate(${page.rotation || 0}deg) scale(${(page.rotation || 0) % 180 ? 0.72 : 1})" loading="lazy"/><span class="page-index">${page.pageNumber}</span></div>
               <span class="page-detection">${page.hasQr ? 'QR marker detected' : 'No QR marker detected'}</span>
               <div class="page-controls"><label class="page-check"><input id="front-${index}" type="checkbox" data-page="${index}" ${state.frontPages[index] ? 'checked' : ''} ${disabled(locked)}/> Front page</label>
                 <button id="preview-${index}" data-preview="${index}" class="btn btn-sm btn-outline-secondary page-zoom" aria-label="View page ${page.pageNumber}" title="View full page" ${disabled(Boolean(busy))}>${icon('zoom')}</button></div>
+              <div class="page-edit-controls">
+                <label class="page-check"><input id="skip-${index}" type="checkbox" data-skip="${index}" ${page.skipped ? 'checked' : ''} ${disabled(locked || state.frontPages[index])} /> Skip page</label>
+                <div class="page-edit-buttons">
+                  <button id="rotate-left-${index}" data-rotate="${index}" data-angle="-90" class="btn btn-sm btn-outline-secondary" aria-label="Rotate page ${page.pageNumber} left" title="Rotate left" ${disabled(locked)}>↶</button>
+                  <button id="rotate-right-${index}" data-rotate="${index}" data-angle="90" class="btn btn-sm btn-outline-secondary" aria-label="Rotate page ${page.pageNumber} right" title="Rotate right" ${disabled(locked)}>↷</button>
+                  <button id="move-left-${index}" data-move="${index}" data-direction="-1" class="btn btn-sm btn-outline-secondary" aria-label="Move page ${page.pageNumber} earlier" title="Move earlier" ${disabled(locked || !group.candidate || index <= group.start + 1)}>←</button>
+                  <button id="move-right-${index}" data-move="${index}" data-direction="1" class="btn btn-sm btn-outline-secondary" aria-label="Move page ${page.pageNumber} later" title="Move later" ${disabled(locked || !group.candidate || state.frontPages[index] || index === group.end)}>→</button>
+                </div>
+              </div>
             </article>`;
           }).join('')}</div>
         </section>`).join('')}</div>
         <div class="review-actions"><span>Original pages and print quality are preserved.</span><button id="prepare" class="btn btn-primary" ${disabled(locked || files.length > 0)}>Prepare ${examCount} PDF${examCount === 1 ? '' : 's'}</button></div>
       </section>` : ''}
+      </div></section>
+      ${subtask('save', 3, 'Save individual PDFs', files.length ? `${files.length} PDFs prepared · ${uploaded} saved to Drive` : 'Available after reviewing and preparing PDFs', files.length > 0, busy === 'upload')}
       ${files.length ? `<section class="results-section" aria-labelledby="results-heading"><div class="section-heading"><div><p class="eyebrow">INDIVIDUAL EXAMS</p><h2 id="results-heading">${allUploaded ? 'All exams saved to Drive' : 'Your PDFs are ready'}</h2></div><span class="count-badge">${uploaded} / ${files.length} saved</span></div>
-        <div class="result-list">${files.map((file, index) => `<article class="result-row"><span class="result-number">${String(index + 1).padStart(2, '0')}</span><div class="result-info"><strong>${escapeHtml(file.name)}</strong><span>Pages ${file.start}–${file.end} · ${file.end - file.start + 1} page${file.end === file.start ? '' : 's'} · ${formatSize(file.blob.size)}</span>${file.error ? `<span class="text-danger">${escapeHtml(file.error)}</span>` : ''}</div><div class="result-actions"><a href="${file.previewUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Preview</a><a href="${file.previewUrl}" download="${escapeHtml(file.name)}" class="download-link">Download</a>${file.uploaded ? `<a class="saved-link" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${encodeURIComponent(file.driveId!)}/view">Saved ↗</a>` : '<span class="pending-label">Pending</span>'}</div></article>`).join('')}</div>
-        <div class="upload-footer"><p>${state.folder ? `Destination: <strong>${escapeHtml(state.folder.name)}</strong>` : 'Choose an output folder above to save these PDFs to Drive.'}<span>${state.uploadStarted ? 'Keep this tab open to preserve upload progress and retry safely.' : 'Files use numbered names. Student matching comes in Part II.'}</span></p>
+        <div class="result-list">${files.map((file, index) => `<article class="result-row"><span class="result-number">${String(index + 1).padStart(2, '0')}</span><div class="result-info"><strong>${escapeHtml(file.name)}</strong><span>Source pages ${file.pageNumbers.join(', ')} · ${file.pageNumbers.length} page${file.pageNumbers.length === 1 ? '' : 's'} · ${formatSize(file.blob.size)}</span>${file.error ? `<span class="text-danger">${escapeHtml(file.error)}</span>` : ''}</div><div class="result-actions"><a href="${file.previewUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Preview</a><a href="${file.previewUrl}" download="${escapeHtml(file.name)}" class="download-link">Download</a>${file.uploaded ? `<a class="saved-link" target="_blank" rel="noopener" href="https://drive.google.com/file/d/${encodeURIComponent(file.driveId!)}/view">Saved ↗</a>` : '<span class="pending-label">Pending</span>'}</div></article>`).join('')}</div>
+        <div class="upload-footer"><p>${state.folder ? `Destination: <strong>${escapeHtml(state.folder.name)}</strong>` : 'Choose an output folder above to save these PDFs to Drive.'}<span>${state.uploadStarted ? 'Keep this tab open to preserve upload progress and retry safely.' : 'Files use numbered names. Match students is a separate task.'}</span></p>
         <button id="upload" class="btn btn-primary" ${disabled(Boolean(busy) || !state.folder || allUploaded || !state.connected)}>${busy === 'upload' ? 'Saving to Drive…' : allUploaded ? 'All files saved' : state.uploadStarted ? 'Retry remaining uploads' : `Save ${files.length} PDFs to Drive`}</button></div>
       </section>` : ''}
+      </div></section>
       ${!pages.length ? `<section class="how-it-works"><div class="qr-symbol" aria-hidden="true">▦</div><div><h2>A small marker does the sorting.</h2><p>A QR code marks the beginning of a test. We keep each front page and all pages after it together, right up to the next QR code. The code’s contents don’t matter.</p></div></section>` : ''}
-      <footer class="site-footer"><span>PDF processing happens in your browser.</span><span>Part I of III · Slice → Match → Draft</span></footer>
+      </div>
+      <footer class="site-footer"><span>PDF processing happens in your browser.</span><span>Three independent tasks · Slice · Match · Draft</span></footer>
     </main>`;
 }
 
