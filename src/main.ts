@@ -1,5 +1,6 @@
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles/main.css';
+import { BatchSendTask } from './batchSend';
 import { DraftTask } from './drafts';
 import { MatchingTask } from './matching';
 import { GoogleDrive } from './googleDrive';
@@ -18,11 +19,12 @@ let sourceBytes: Uint8Array | undefined;
 let controller: AbortController | undefined;
 let pickerTask: 'slice' | 'match' | 'drafts' = 'slice';
 const matching = new MatchingTask(drive, render, busy => { state.busy = busy ? 'match' : ''; });
+const batchSend = new BatchSendTask(drive, render, busy => { state.busy = busy ? 'send' : ''; });
 const drafts = new DraftTask(drive, render, busy => { state.busy = busy ? 'drafts' : ''; });
 
 function render(): void {
   const focused = document.activeElement?.id;
-  app.innerHTML = renderApp(state, state.task === 'match' ? matching.render(state.ready && hasGoogleConfig()) : '', state.task === 'drafts' ? drafts.render(state.ready && hasGoogleConfig()) : '');
+  app.innerHTML = renderApp(state, state.task === 'match' ? matching.render(state.ready && hasGoogleConfig()) : '', state.task === 'drafts' ? drafts.render(state.ready && hasGoogleConfig()) : '', state.task === 'send' ? batchSend.render(state.ready && hasGoogleConfig()) : '');
   if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
 }
 // Keep the existing bar mounted so chunk updates do not restart its animation
@@ -185,6 +187,7 @@ app.addEventListener('click', event => {
       drafts.pick(target.id === 'draft-folder' ? 'folder' : 'csv');
       return;
     }
+    if (state.task === 'send' && batchSend.handle(target.id)) return;
     if (state.task === 'drafts' && drafts.handle(target.id)) return;
     if (target.id === 'match-folder' || target.id === 'match-csv') {
       pickerTask = 'match'; state.busy = 'picker'; state.error = ''; render();
@@ -221,7 +224,7 @@ app.addEventListener('click', event => {
     switch (target.id) {
       case 'connect':
         if (drive.connected) {
-          drive.disconnect(); drafts.reset(); matching.reset(); clearScan(); state.source = state.folder = state.localFile = undefined; render();
+          drive.disconnect(); batchSend.reset(); drafts.reset(); matching.reset(); clearScan(); state.source = state.folder = state.localFile = undefined; render();
         } else drive.connect();
         break;
       case 'choose-pdf': case 'choose-folder':
@@ -281,9 +284,9 @@ app.addEventListener('keydown', event => {
   const target = event.target as HTMLElement;
   if (target.id === 'student-search') { matching.keydown(event); return; }
   if (!target.dataset.task || state.busy) return;
-  const tabs = ['slice', 'match', 'drafts'];
+  const tabs = ['slice', 'match', 'drafts', 'send'];
   const index = tabs.indexOf(state.task);
-  const next = event.key === 'ArrowRight' ? (index + 1) % 3 : event.key === 'ArrowLeft' ? (index + 2) % 3 : event.key === 'Home' ? 0 : event.key === 'End' ? 2 : -1;
+  const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
   if (next < 0) return;
   event.preventDefault();
   document.getElementById(`task-${tabs[next]}`)?.click();
@@ -291,6 +294,10 @@ app.addEventListener('keydown', event => {
 
 app.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
+  if (input.dataset.sendRow !== undefined) {
+    if (!state.busy) batchSend.select(Number(input.dataset.sendRow), input.checked);
+    return;
+  }
   if (input.dataset.draftFile !== undefined) {
     if (!state.busy) drafts.select(Number(input.dataset.draftFile), input.checked);
     return;

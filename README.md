@@ -40,11 +40,12 @@ For deployment, run `npm run build`, host `dist/` on HTTPS, add the production o
 
 ## Tasks and subtasks
 
-The application has three independent **Tasks**, shown as tabs. They are entry points, not mandatory sequential steps:
+The application has four independent **Tasks**, shown as tabs. They are entry points, not mandatory sequential steps:
 
 - **Slice exams**: split a combined scan into individual exam PDFs. This task is implemented and can be completed without matching students or preparing email drafts.
 - **Match students**: start directly with a Google Drive folder containing already-sliced exams and a student CSV list. Match exams to students using their handwritten names. Slicing need not happen in the same session or in this application.
-- **Prepare drafts**: start with renamed exam PDFs and the student CSV, expand a message template, then create Gmail drafts with real PDF attachments for manual review. Nothing is sent by the app.
+- **Batch send**: independently load drafts using the Gmail label `bulk-send`, select messages and send them explicitly.
+- **Prepare drafts**: start with renamed exam PDFs and the student CSV, expand a message template, then create Gmail drafts with real PDF attachments for manual review. This task does not send emails.
 
 Each task loads its own inputs. Matching reuses the slicing folder initially; drafting reuses the matching folder and CSV initially. Switching tabs preserves each in-memory batch. After reloading, select the matching folder and CSV again; existing student filenames are recognized without renaming them automatically.
 
@@ -87,10 +88,19 @@ The `Nr.` column must contain unique numeric student numbers; filename numbers a
 
 The CSV, all exam PDFs and all name previews are kept in browser memory until the matching inputs change, reload, or disconnect. Large folders therefore require enough browser memory. Cancelled or failed preloads release the partial cache and leave file selection open for retry. Changing the checked files clears the prepared previews and requires preloading again; completed Drive renames are preserved. Renamed filenames persist in Drive; no matching spreadsheet or student metadata is uploaded. Reloading requires selecting the folder and CSV again. Email addresses are read for matching context and future draft work; no email is sent or drafted by the matching task.
 
+## Batch send workflow
+
+1. Open **Batch send** and enable Gmail access (`gmail.compose`) if needed. Gmail API must be enabled in your Google Cloud project.
+2. Click **Load drafts**. The app searches all result pages using exactly `label:bulk-send`; subject tags are not used. **Gmail does not support custom labels on draft messages**, so this search may return no results even if a related conversation is labeled. This follows the requested literal label behavior; see [Google’s label documentation](https://developers.google.com/workspace/gmail/api/guides/labels).
+3. Check the drafts to send (initially none are selected), or use **Select all**. Review the account, subject, To/Cc/Bcc, message snippet and attachment names. Open Gmail to inspect full message contents if needed.
+4. **Batch send** immediately sends only the selected existing drafts, including their original attachments. Successful sends are marked and cannot be selected again. The panel folds when the selection completes.
+
+The account, label search membership and draft contents are checked again before sending. Avoid editing drafts in Gmail while sending: Gmail has no atomic conditional send operation. Sending stops on the first failure. **Stop after this email** lets the current operation finish. An uncertain response disables retry for that draft; check Gmail Sent manually. Outcome tracking lasts for this page session, including list refreshes, but is lost on page reload. Prepare drafts remains independent and never sends automatically.
+
 ## Prepare drafts workflow
 
 1. Open **Prepare drafts**. The folder and CSV are prefilled from Match students when available, or can be selected independently. Filenames must match the padded `NR_NACHNAME_VORNAME.pdf` names derived from the CSV.
-2. Click **Enable Gmail drafts** to authorize `gmail.compose` and access to the exam folder. Gmail API must be enabled in your Google Cloud project. Google's scope includes sending permission, but this app exposes only draft creation and lookup: it never calls a send endpoint.
+2. Click **Enable Gmail drafts** to authorize `gmail.compose` and access to the exam folder. Gmail API must be enabled in your Google Cloud project. Google's scope includes sending permission, and is also used by the separate Batch send task. Prepare drafts never sends emails.
 3. Click **Load recipients & exams**. The app reads the Gmail account, CSV and folder listing. It selects PDFs with an exact filename match and a valid student email. Unmatched names, duplicate PDF names and missing/invalid addresses are shown as issues and cannot be selected. Other valid PDFs may be unchecked.
 4. Write subject and plain-text body templates. Placeholders use CSV column headers, such as `{{Vorname}}`, `{{Nachname}}`, `{{Nr.}}`, `{{E-Mail-Adresse}}`, or additional columns like `{{Klasse}}`. Unknown or incomplete placeholders are rejected. There is no code execution, HTML formatting, conditionals or loops.
 5. Optional comma-separated **subject tags**, such as `8A, Informatik`, produce `[8A] [Informatik]` at the start of each subject. These are searchable subject text, not Gmail labels. The [Gmail API does not allow custom labels on draft messages](https://developers.google.com/workspace/gmail/api/guides/labels).
@@ -138,6 +148,7 @@ Unit tests cover grouping, leading-page handling, naming, Drive permissions, tok
 
 - `src/main.ts`: workflow state, progress and event coordination.
 - `src/matching.ts`, `src/students.ts`: independent matching workflow and CSV parsing.
+- `src/batchSend.ts`: labeled draft selection, review and explicit batch sending.
 - `src/drafts.ts`, `src/draftPlan.ts`: draft workflow, file-to-student validation and preview.
 - `src/email.ts`, `src/gmail.ts`: MIME attachment encoding and Gmail draft-only API calls.
 - `src/googleDrive.ts`: OAuth, Picker, downloads, folder validation and uploads.

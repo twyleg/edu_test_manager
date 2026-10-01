@@ -32,8 +32,13 @@ export class GoogleDrive {
     this.client.requestAccessToken({ scope: `${driveScope} ${matchingScope} ${draftsScope}`, prompt: 'consent' });
   }
 
-  /** Restricted to draft operations; no send endpoint is exposed. */
-  async gmailRequest(path: 'profile' | 'drafts' | `drafts?${string}`, init: RequestInit = {}): Promise<Response> {
+  connectSending(): void {
+    if (!this.client) throw new Error('Google sign-in is not ready.');
+    this.client.requestAccessToken({ scope: draftsScope, prompt: 'consent' });
+  }
+
+  /** Gmail draft operations, including explicit sending from Batch send. */
+  async gmailRequest(path: 'profile' | 'drafts' | `drafts?${string}` | `drafts/${string}`, init: RequestInit = {}): Promise<Response> {
     if (!this.draftsAccess) throw new GoogleHttpError('Enable Gmail drafts access, then retry.', 401);
     return this.request(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, init);
   }
