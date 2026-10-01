@@ -10,14 +10,13 @@
  * FONT IMPORTS
  * ================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Manrope:wght@400;500;600;650;700;750;800&display=swap');
 
 /* ==================================================================
  * DESIGN TOKENS AND BASE ELEMENTS
  * ================================================================== */
 
 :root {
-    font-family: "DM Sans", sans-serif;
+    font-family: "DM Sans Variable", sans-serif;
     color: #283d35;
     background: #f7f8f4;
     font-synthesis: none;
@@ -30,7 +29,7 @@ body {
     margin: 0;
     background: #f7f8f4;
     color: #283d35;
-    font-family: "DM Sans", sans-serif;
+    font-family: "DM Sans Variable", sans-serif;
     font-size: 14px;
 }
 
@@ -41,7 +40,7 @@ svg {
 }
 
 h1, h2 {
-    font-family: "Manrope", sans-serif;
+    font-family: "Manrope Variable", sans-serif;
 }
 
 h1 {
@@ -79,7 +78,7 @@ h1 {
     align-items: center;
     gap: 8px;
     color: #253d34;
-    font-family: "Manrope", sans-serif;
+    font-family: "Manrope Variable", sans-serif;
     font-size: 19px;
     font-weight: 800;
     text-decoration: none;
@@ -1149,7 +1148,7 @@ h1 {
 
 .subtask-title small {
     display: block;
-    font: 400 12px "DM Sans", sans-serif;
+    font: 400 12px "DM Sans Variable", sans-serif;
     color: #7a8575;
     margin-top: 6px;
     overflow-wrap: anywhere;
@@ -1376,3 +1375,10 @@ body:has(.progress-island) {
 .draft-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; background: white; border-left: 3px solid #cbd6c5; padding: 15px; }
 .draft-preview p { margin: 10px 0; }
 @media (max-width: 600px) { .draft-editor { padding: 18px; } }
+
+.privacy-footer { padding: 20px 0; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.privacy-panel { padding: 24px; margin-bottom: 24px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.privacy-panel h2 { font-size: 1.2rem; }
+.privacy-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+
+.privacy-panel:not([hidden]) { position: fixed; z-index: 1100; bottom: 16px; left: 16px; right: 16px; width: calc(100% - 32px); max-height: 75vh; overflow: auto; margin: 0 auto; box-shadow: 0 8px 40px #0003; }

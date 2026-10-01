@@ -1,7 +1,9 @@
 import type { Page } from '@playwright/test';
 
-export async function mockGoogleUi(page: Page, manualSelection = false): Promise<void> {
-  await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
+export async function mockGoogleUi(page: Page, manualSelection = false, attachmentMime = 'application/octet-stream', attachmentCount = 1, consent = true): Promise<void> {
+  if (consent) await page.addInitScript(() => {
+    if (!localStorage.getItem('edu-test-manager-privacy-v1')) localStorage.setItem('edu-test-manager-privacy-v1', JSON.stringify({ google: true, rememberFolder: true, expires: Date.now() + 180 * 86400000 }));
+  });
   await page.route('https://apis.google.com/js/api.js', route => route.fulfill({ contentType: 'application/javascript', body: `
     window.gapi = { load: (name, options) => options.callback() };
     window.google = window.google || {};
@@ -9,9 +11,10 @@ export async function mockGoogleUi(page: Page, manualSelection = false): Promise
       constructor(id) { this.id = id; }
       setIncludeFolders() { return this; } setSelectFolderEnabled(enabled) { this.selectFolders = enabled; return this; }
       setMimeTypes(mime) { this.mime = mime; return this; } setMode() { return this; }
-      setParent() { return this; } setEnableDrives() { return this; }
+      setParent(parent) { this.parent = parent; return this; } setLabel(label) { this.label = label; return this; } setEnableDrives() { return this; }
     }
     class PickerBuilder {
+      enableFeature(feature) { this.feature = feature; return this; }
       setTitle(title) { this.title = title; return this; }
       setDeveloperKey() { return this; } setAppId() { return this; } setOAuthToken() { return this; }
       setOrigin() { return this; } addView(view) { (this.views ||= []).push(view); return this; }
@@ -21,15 +24,19 @@ export async function mockGoogleUi(page: Page, manualSelection = false): Promise
       build() { return { setVisible: () => {
         if (!this.relayUrl || new URL(this.relayUrl).origin !== location.origin) throw new Error('Picker needs a same-origin relay URL.');
         window.__mockPickerRelayUrl = this.relayUrl;
+        window.__mockPickerParents = this.views.map(view => view.parent || null);
+        const attachment = this.title.includes('shared attachment');
         const folder = this.title.includes('folder');
         const csv = this.title.includes('CSV');
-        const item = { id: folder ? 'destination-folder' : csv ? 'students-csv' : 'source-pdf',
-          name: folder ? 'Physics class' : csv ? 'students.csv' : 'Drive exam.pdf',
-          mimeType: folder ? 'application/vnd.google-apps.folder' : csv ? 'text/csv' : 'application/pdf' };
-        if (!this.selectableMimeTypes.split(',').includes(item.mimeType)) throw new Error('Picker must explicitly allow the selected MIME type.');
+        const item = { id: attachment ? 'shared-attachment' : folder ? 'destination-folder' : csv ? 'students-csv' : 'source-pdf',
+          name: attachment ? 'Shared guide' : folder ? 'Physics class' : csv ? 'students.csv' : 'Drive exam.pdf',
+          mimeType: attachment ? ${JSON.stringify(attachmentMime)} : folder ? 'application/vnd.google-apps.folder' : csv ? 'text/csv' : 'application/pdf' };
+        const items = attachment ? Array.from({ length: ${attachmentCount} }, (_, index) => ({ ...item, id: index ? item.id + '-' + index : item.id, name: index ? item.name + ' ' + index : item.name })) : [item];
+        if (attachment && this.feature !== 'multi') throw new Error('Attachment picker must allow multiple selections.');
+        if (!attachment && !this.selectableMimeTypes.split(',').includes(item.mimeType)) throw new Error('Picker must explicitly allow the selected MIME type.');
         if (folder && !this.views.every(view => view.selectFolders)) throw new Error('Folder selection must be enabled in every view.');
         if (!${manualSelection}) {
-          setTimeout(() => this.callback({ action: 'picked', docs: [item] }), 0);
+          setTimeout(() => this.callback({ action: 'picked', docs: items, parents: csv ? [{ id: 'student-list-folder' }] : undefined }), 0);
           return;
         }
         const dialog = document.createElement('div');
@@ -41,7 +48,7 @@ export async function mockGoogleUi(page: Page, manualSelection = false): Promise
         const select = document.createElement('button');
         select.textContent = 'Select'; select.disabled = true;
         row.onclick = () => { select.disabled = false; };
-        select.onclick = () => { dialog.remove(); this.callback({ action: 'picked', docs: [item] }); };
+        select.onclick = () => { dialog.remove(); this.callback({ action: 'picked', docs: items, parents: csv ? [{ id: 'student-list-folder' }] : undefined }); };
         const cancel = document.createElement('button');
         cancel.textContent = 'Cancel';
         cancel.onclick = () => { dialog.remove(); this.callback({ action: 'cancel' }); };
@@ -53,9 +60,9 @@ export async function mockGoogleUi(page: Page, manualSelection = false): Promise
         this.callback({ action: 'loaded' });
       } }; }
     }
-    window.google.picker = { DocsView, PickerBuilder, ViewId: { DOCS: 'docs', PDFS: 'pdfs', FOLDERS: 'folders' },
+    window.google.picker = { DocsView, PickerBuilder, Feature: { MULTISELECT_ENABLED: 'multi' }, ViewId: { DOCS: 'docs', PDFS: 'pdfs', FOLDERS: 'folders' },
       DocsViewMode: { LIST: 'list' }, Action: { PICKED: 'picked', CANCEL: 'cancel' },
-      Response: { ACTION: 'action', DOCUMENTS: 'docs' }, Document: { ID: 'id', NAME: 'name', MIME_TYPE: 'mimeType' } };
+      Response: { ACTION: 'action', DOCUMENTS: 'docs', PARENTS: 'parents' }, Document: { ID: 'id', NAME: 'name', MIME_TYPE: 'mimeType' } };
   ` }));
   await page.route('https://accounts.google.com/gsi/client', route => route.fulfill({ contentType: 'application/javascript', body: `
     window.google = window.google || {};

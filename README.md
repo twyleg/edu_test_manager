@@ -91,11 +91,13 @@ The CSV, all exam PDFs and all name previews are kept in browser memory until th
 ## Batch send workflow
 
 1. Open **Batch send** and enable Gmail access (`gmail.compose`) if needed. Gmail API must be enabled in your Google Cloud project.
-2. Click **Load drafts**. The app searches all result pages using exactly `label:bulk-send`; subject tags are not used. **Gmail does not support custom labels on draft messages**, so this search may return no results even if a related conversation is labeled. This follows the requested literal label behavior; see [Google’s label documentation](https://developers.google.com/workspace/gmail/api/guides/labels).
+2. Click **Load drafts**. The app searches all result pages using exactly `label:bulk-send`; subject tags are not used. Apply `bulk-send` using Prepare drafts or Gmail. Newly applied labels may take time to appear in Gmail and search.
 3. Check the drafts to send (initially none are selected), or use **Select all**. Review the account, subject, To/Cc/Bcc, message snippet and attachment names. Open Gmail to inspect full message contents if needed.
 4. **Batch send** immediately sends only the selected existing drafts, including their original attachments. Successful sends are marked and cannot be selected again. The panel folds when the selection completes.
 
 The account, label search membership and draft contents are checked again before sending. Avoid editing drafts in Gmail while sending: Gmail has no atomic conditional send operation. Sending stops on the first failure. **Stop after this email** lets the current operation finish. An uncertain response disables retry for that draft; check Gmail Sent manually. Outcome tracking lasts for this page session, including list refreshes, but is lost on page reload. Prepare drafts remains independent and never sends automatically.
+
+Custom draft labels were verified successfully against the user’s Gmail account using both `messages.modify` and `threads.modify`, despite the restriction stated in Google’s documentation. Prepare drafts uses `messages.modify` and verifies the applied labels by reading the draft back.
 
 ## Prepare drafts workflow
 
@@ -103,11 +105,12 @@ The account, label search membership and draft contents are checked again before
 2. Click **Enable Gmail drafts** to authorize `gmail.compose` and access to the exam folder. Gmail API must be enabled in your Google Cloud project. Google's scope includes sending permission, and is also used by the separate Batch send task. Prepare drafts never sends emails.
 3. Click **Load recipients & exams**. The app reads the Gmail account, CSV and folder listing. It selects PDFs with an exact filename match and a valid student email. Unmatched names, duplicate PDF names and missing/invalid addresses are shown as issues and cannot be selected. Other valid PDFs may be unchecked.
 4. Write subject and plain-text body templates. Placeholders use CSV column headers, such as `{{Vorname}}`, `{{Nachname}}`, `{{Nr.}}`, `{{E-Mail-Adresse}}`, or additional columns like `{{Klasse}}`. Unknown or incomplete placeholders are rejected. There is no code execution, HTML formatting, conditionals or loops.
-5. Optional comma-separated **subject tags**, such as `8A, Informatik`, produce `[8A] [Informatik]` at the start of each subject. These are searchable subject text, not Gmail labels. The [Gmail API does not allow custom labels on draft messages](https://developers.google.com/workspace/gmail/api/guides/labels).
-6. Click **Preview drafts** and review every recipient, personalized subject/body and attachment filename. Then click **Create drafts in Gmail**. Each selected PDF is downloaded and attached as `application/pdf` using MIME attachment encoding; no Drive sharing link is substituted. Attachments are limited to 25 MB per PDF.
+5. **Gmail labels** defaults to `bulk-send`. Edit the comma-separated list or clear it to create unlabeled drafts. Subject tags have been removed; the subject is exactly the expanded subject template.
+6. Click **Preview drafts** and review every recipient, personalized subject/body and attachment filename. Then click **Create drafts in Gmail**. Each selected PDF is downloaded and attached as `application/pdf` using MIME attachment encoding; no Drive sharing link is substituted. Use **Shared attachments for all students** to select multiple shared files from your computer or Google Drive (for example, a marking guide), using the controls below the message template. The exam and all shared files are real MIME attachments; their combined size must not exceed 25 MB per draft. Drive files are downloaded once at selection and retained for all drafts and retries. Google Docs, Sheets, Slides and Drawings are exported to PDF (Google limits exports to 10 MB). Unsupported Google-native items such as folders, shortcuts and Forms are rejected. All shared attachments are listed in every preview. Add more files from either source, or remove files individually before creation. A failed or cancelled Drive selection keeps existing attachments and adds none of the files from that selection.
+   Enter comma-separated **Gmail labels**, for example `bulk-send, 8A, Informatik`. Click **Enable Gmail labels** to grant `gmail.modify` (add `https://www.googleapis.com/auth/gmail.modify` to the OAuth consent configuration). Existing labels are reused and missing ones created. Labels are shown in the preview, applied after draft creation, and verified before the draft is marked complete.
 7. Completed drafts appear in Gmail's Drafts folder for manual checks and sending. The final panel folds automatically when the batch completes. The app displays the account used; if Gmail opens another account, switch to the displayed account.
 
-Once creation starts, folder, recipients and templates are locked for consistent retries. Successfully created drafts are skipped when resuming. **Stop after this draft** finishes the in-flight operation without starting another. An ambiguous creation response is reconciled by searching for the draft's unique Message-ID; if Gmail cannot confirm it, the app stops instead of risking a duplicate. Keep this tab open: retry tracking is in memory, and reloading then creating another batch can create duplicate drafts. Search indexing can delay confirmation after a lost response. If it cannot be confirmed, check Gmail manually before starting a new batch; abandoning an incomplete batch asks for confirmation because its retry tracking will be discarded. PDFs in Drive are neither renamed nor modified by this task.
+Once creation starts, folder, recipients and templates are locked for consistent retries. Completed drafts are skipped when resuming. If a draft was saved but labeling failed, retry applies only missing labels to that existing draft, without downloading the exam or creating another draft. **Stop after this draft** finishes the in-flight operation without starting another. An ambiguous creation response is reconciled by searching for the draft's unique Message-ID; if Gmail cannot confirm it, the app stops instead of risking a duplicate. Keep this tab open: retry tracking is in memory, and reloading then creating another batch can create duplicate drafts. Search indexing can delay confirmation after a lost response. If it cannot be confirmed, check Gmail manually before starting a new batch; abandoning an incomplete batch asks for confirmation because its retry tracking will be discarded. PDFs in Drive are neither renamed nor modified by this task.
 
 ## Data and limitations
 
@@ -159,3 +162,34 @@ Unit tests cover grouping, leading-page handling, naming, Drive permissions, tok
 - `tests/`: unit tests and browser integration tests.
 
 API references: [Google Picker](https://developers.google.com/workspace/drive/picker/reference/picker.docsview), [Drive uploads](https://developers.google.com/workspace/drive/api/guides/manage-uploads), [Drive downloads](https://developers.google.com/workspace/drive/api/guides/manage-downloads), [PDF.js examples](https://mozilla.github.io/pdf.js/examples/).
+
+After choosing **Enable Google & remember folder**, student CSV pickers in Match students and Prepare drafts remember the parent folder of the last selected CSV using browser local storage. Only the folder ID is saved, across reloads in this browser and app origin. The remembered folder opens as the first view; My Drive and shared drives remain available if you want another folder or the saved folder is no longer accessible. If browser storage is disabled, selection still works without remembering the location. Clearing this site’s browser storage resets the preference.
+
+## GitHub Pages deployment
+
+The repository is configured for `https://<OWNER>.github.io/edu_test_manager/`. No backend is required.
+
+1. Create/push the repository as **edu_test_manager**. In **Settings → Pages → Build and deployment**, select **GitHub Actions**.
+2. In **Settings → Secrets and variables → Actions → Variables**, add `VITE_GOOGLE_CLIENT_ID`, `VITE_GOOGLE_API_KEY` and `VITE_GOOGLE_APP_ID` with the same public configuration described above. The app ID is the numeric Google Cloud project number. These values are compiled into browser assets; do not supply an OAuth client secret or access token.
+3. In the Google Cloud OAuth web client, add `https://<OWNER>.github.io` as an **Authorized JavaScript origin** (no repository path). Retain localhost origins for development. Configure the API key’s website restriction for `https://<OWNER>.github.io/*`, and enable Google Picker, Drive and Gmail APIs as described above. This token-client flow does not require an OAuth redirect endpoint in the application.
+4. Review `public/privacy.html` before public deployment. Add the actual operator/controller identity, contact, legal bases, retention and any deployment-specific privacy information or link to your institution’s privacy policy. The supplied page describes technical behavior; it is not a complete operator-specific legal notice. Configure Google’s OAuth consent screen, scopes, test users/publishing status and required verification for your audience.
+5. Push to the repository’s default branch (`main` or `master`) or run **Deploy GitHub Pages** manually from that branch. The workflow validates configuration, installs with `npm ci`, runs unit tests, builds and uploads only `dist/`, and deploys through the protected `github-pages` environment. Other branches do not deploy.
+
+Local verification of the production subdirectory:
+
+```sh
+npm run build:pages
+npm run preview:pages -- --host 127.0.0.1 --port 4173
+# Optional browser smoke test (requires Playwright Chromium):
+npm run test:pages
+```
+
+Open `http://127.0.0.1:4173/edu_test_manager/`. Development (`npm run dev`) remains at `/`. The production assets, PDF workers, Google Picker relay, privacy page and font license links work under the repository path. Only built application files and `public/` content are published; `.env`, student lists, exam resources and test output are not copied to Pages. Do not put private student data in `public/`. A custom domain or renamed repository requires changing the `--base` in the Pages build/preview scripts and Google origin/referrer configuration.
+
+## Privacy choices and local fonts
+
+On first visit, Google scripts and saved student-folder access are blocked until an affirmative choice in the privacy panel. **Enable Google & remember folder** is the default offered option. Alternatives enable Google without remembering or use only local PDF processing. Choosing an option is required; the default is not treated as prior consent. Google OAuth permission is separate. The privacy choice lasts 180 days; it is stored locally to avoid asking on every visit. If browser storage is blocked, choices work for the current page only.
+
+**Privacy & storage settings** is always available below the app. Disabling remembering deletes the folder preference. Selecting local-only mode deletes the app token and folder ID and reloads to unload Google scripts; finish current work first. It does not clear Google’s own cookies or revoke your Google account permissions. The linked privacy notice explains data flows, browser storage, hosting and user controls. It must be completed by the deployment operator before public use; these technical controls are not a blanket legal-compliance certification.
+
+DM Sans and Manrope are bundled with the app using Fontsource packages and served from the same origin, including on GitHub Pages. No Google Fonts requests are made. Their SIL Open Font Licenses are included in `public/fonts/` and linked from the privacy notice.

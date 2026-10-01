@@ -1,3 +1,6 @@
+import '@fontsource-variable/dm-sans';
+import '@fontsource-variable/manrope';
+import { googleAllowed, mountPrivacy } from './privacy';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles/main.css';
 import { BatchSendTask } from './batchSend';
@@ -182,9 +185,9 @@ app.addEventListener('click', event => {
       document.getElementById(`task-${state.task}`)?.focus();
       return;
     }
-    if (target.id === 'draft-folder' || target.id === 'draft-csv') {
+    if (target.id === 'draft-folder' || target.id === 'draft-csv' || target.id === 'draft-extra-drive') {
       pickerTask = 'drafts'; state.busy = 'picker'; state.error = ''; render();
-      drafts.pick(target.id === 'draft-folder' ? 'folder' : 'csv');
+      drafts.pick(target.id === 'draft-extra-drive' ? 'attachment' : target.id === 'draft-folder' ? 'folder' : 'csv');
       return;
     }
     if (state.task === 'send' && batchSend.handle(target.id)) return;
@@ -277,7 +280,7 @@ app.addEventListener('dragend', () => { draggedPage = undefined; });
 app.addEventListener('input', event => {
   const input = event.target as HTMLInputElement;
   if (input.id === 'student-search') matching.input(input.value);
-  if (state.task === 'drafts' && ['draft-subject', 'draft-body', 'draft-tags'].includes(input.id)) drafts.input(input.id, input.value);
+  if (state.task === 'drafts' && ['draft-subject', 'draft-body', 'draft-labels'].includes(input.id)) drafts.input(input.id, input.value);
 });
 
 app.addEventListener('keydown', event => {
@@ -294,6 +297,7 @@ app.addEventListener('keydown', event => {
 
 app.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
+  if (input.id === 'draft-extra') { if (!state.busy && input.files?.[0]) drafts.attachments(Array.from(input.files)); return; }
   if (input.dataset.sendRow !== undefined) {
     if (!state.busy) batchSend.select(Number(input.dataset.sendRow), input.checked);
     return;
@@ -333,18 +337,29 @@ window.addEventListener('beforeunload', event => {
   if (state.busy || drafts.hasIncompleteBatch || (state.uploadStarted && state.files.some(file => !file.uploaded))) event.preventDefault();
 });
 
-render();
-if (hasGoogleConfig()) {
-  void drive.initialize({
+let googleInitialization: Promise<void> | undefined;
+function initializeGoogle(): void {
+  if (!hasGoogleConfig() || googleInitialization) return;
+  googleInitialization = drive.initialize({
     onConnection: connected => { state.connected = connected; render(); },
     onError: message => { state.busy = ''; reportError(new Error(message)); },
     onPickerClosed: () => { state.busy = ''; render(); },
-    onPick: (kind, item) => {
-      if (pickerTask === 'drafts') { drafts.accept(item); render(); return; }
+    onPick: (kind, item, items) => {
+      if (pickerTask === 'drafts') { drafts.accept(item, items); render(); return; }
       if (pickerTask === 'match') { matching.accept(item); render(); return; }
       if (kind === 'pdf') { clearScan(); state.localFile = undefined; state.source = item; }
       else { state.folder = item; state.error = ''; }
       render();
     },
-  }).then(() => { state.ready = true; render(); }).catch(reportError);
+  }).then(() => { state.ready = true; render(); }).catch(error => { googleInitialization = undefined; reportError(error); });
 }
+render();
+mountPrivacy((allowed, previous) => {
+  if (allowed) initializeGoogle();
+  else if (previous) {
+    // Disable app API calls immediately, even if a beforeunload prompt is cancelled.
+    drive.forgetSession(); state.ready = false; googleInitialization = undefined; render();
+    window.location.reload();
+  }
+}, () => Boolean(state.busy));
+if (googleAllowed()) initializeGoogle();

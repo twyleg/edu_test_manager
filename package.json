@@ -11,9 +11,14 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "build:pages": "tsc && vite build --base=/edu_test_manager/",
+    "preview:pages": "vite preview --base=/edu_test_manager/",
+    "test:pages": "npm run build:pages && playwright test --config=playwright.pages.config.ts"
   },
   "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
     "bootstrap": "^5.3.3",
     "jsqr": "^1.4.0",
     "pdf-lib": "^1.17.1",

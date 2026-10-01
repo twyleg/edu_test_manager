@@ -11,6 +11,7 @@ export interface DraftRow {
   body?: string;
   messageId?: string;
   draftId?: string;
+  labelsApplied?: boolean;
   uncertain?: boolean;
   error?: string;
 }
@@ -23,16 +24,10 @@ export function planDrafts(files: DriveItem[], students: Student[]): DraftRow[] 
     return { file, student, issue, included: !issue };
   });
 }
-export function subjectPrefix(tags: string): string {
-  const values = tags.split(',').map(tag => tag.trim()).filter(Boolean);
-  if (values.some(tag => /[\r\n\u0000\[\]]/.test(tag))) throw new Error('Enter subject tags separated by commas, without brackets or line breaks.');
-  return values.length ? values.map(tag => `[${tag}]`).join(' ') + ' ' : '';
-}
-export function prepareDraftRows(rows: DraftRow[], subject: string, body: string, tags: string): void {
-  const prefix = subjectPrefix(tags);
+export function prepareDraftRows(rows: DraftRow[], subject: string, body: string): void {
   const prepared = rows.filter(row => row.included).map(row => {
     if (row.issue || !row.student) throw new Error('Choose only files with a valid student and email address.');
-    const expanded = prefix + expandTemplate(subject, row.student);
+    const expanded = expandTemplate(subject, row.student);
     if (!expanded.trim() || /[\r\n\u0000]/.test(expanded)) throw new Error('Each email subject must be non-empty and contain no line breaks.');
     return { row, subject: expanded, body: expandTemplate(body, row.student) };
   });

@@ -1,17 +1,19 @@
-import { draftsScope, matchingScope, driveScope, folderMimeType, googleConfig, getGoogleConfigError, hasGoogleConfig, pdfMimeType } from './config';
+import { rememberStudentFolder, studentFolderStorageKey } from './privacy';
+import { gmailModifyScope, draftsScope, matchingScope, driveScope, folderMimeType, googleConfig, getGoogleConfigError, hasGoogleConfig, pdfMimeType } from './config';
 import type { DriveItem } from './types';
 
 export class GoogleHttpError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
+const validFolderId = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9_-]+$/.test(value);
 const tokenStorageKey = 'edu-test-manager-token';
 interface CachedToken { accessToken: string; expiresAt: number; scope?: string }
-type PickerKind = 'pdf' | 'folder' | 'csv';
+type PickerKind = 'pdf' | 'folder' | 'csv' | 'attachment';
 interface Callbacks {
   onConnection: (connected: boolean) => void;
   onError: (message: string) => void;
-  onPick: (kind: PickerKind, item: DriveItem) => void;
+  onPick: (kind: PickerKind, item: DriveItem, items?: DriveItem[]) => void;
   onPickerClosed: () => void;
 }
 
@@ -19,6 +21,7 @@ export class GoogleDrive {
   private token: CachedToken | null = null;
   private client: TokenClient | null = null;
   private pendingPicker?: PickerKind;
+  private studentFolderSelection = 0;
   private callbacks?: Callbacks;
 
   get connected(): boolean { return Boolean(this.token && this.token.expiresAt > Date.now()); }
@@ -27,9 +30,16 @@ export class GoogleDrive {
 
   get draftsAccess(): boolean { return this.connected && Boolean(this.token?.scope?.split(' ').includes(draftsScope)); }
 
-  connectDrafts(): void {
+  get gmailLabelsAccess(): boolean { return this.connected && Boolean(this.token?.scope?.split(' ').includes(gmailModifyScope)); }
+
+  async gmailLabelRequest(path: 'labels' | `messages/${string}/modify` | `threads/${string}/modify`, init: RequestInit = {}): Promise<Response> {
+    if (!this.gmailLabelsAccess) throw new GoogleHttpError('Enable Gmail labels, then retry.', 401);
+    return this.request(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, init);
+  }
+
+  connectDrafts(withLabels = false): void {
     if (!this.client) throw new Error('Google sign-in is not ready.');
-    this.client.requestAccessToken({ scope: `${driveScope} ${matchingScope} ${draftsScope}`, prompt: 'consent' });
+    this.client.requestAccessToken({ scope: `${driveScope} ${matchingScope} ${draftsScope}${withLabels ? ` ${gmailModifyScope}` : ''}`, prompt: 'consent' });
   }
 
   connectSending(): void {
@@ -96,10 +106,39 @@ export class GoogleDrive {
     this.client.requestAccessToken({ prompt: this.connected ? '' : 'consent' });
   }
 
+  forgetSession(): void {
+    this.pendingPicker = undefined;
+    this.client = null;
+    this.clearToken();
+  }
+
   disconnect(): void {
     const token = this.token?.accessToken;
     this.clearToken();
     if (token) window.google.accounts.oauth2.revoke(token, () => {});
+  }
+
+  private studentFolder(): string | undefined {
+    if (!rememberStudentFolder()) return undefined;
+    try {
+      const id = localStorage.getItem(studentFolderStorageKey);
+      return validFolderId(id) ? id : undefined;
+    } catch { return undefined; }
+  }
+
+  private async rememberStudentFolder(item: DriveItem, parents: unknown): Promise<void> {
+    if (!rememberStudentFolder()) return;
+    const selection = ++this.studentFolderSelection;
+    try {
+      // Picker supplies parent folders for selections; search results may omit them.
+      let parent = Array.isArray(parents) && parents.length === 1 ? parents[0]?.id : undefined;
+      if (!validFolderId(parent)) {
+        const response = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}?fields=parents&supportsAllDrives=true`);
+        const metadata = await response.json() as { parents?: string[] };
+        parent = metadata.parents?.[0];
+      }
+      if (rememberStudentFolder() && selection === this.studentFolderSelection && validFolderId(parent)) localStorage.setItem(studentFolderStorageKey, parent);
+    } catch { /* Remembering a location is optional; never interrupt CSV selection. */ }
   }
 
   openPicker(kind: PickerKind): void {
@@ -107,21 +146,24 @@ export class GoogleDrive {
     if (configError) throw new Error(configError);
     if (!this.connected) { this.pendingPicker = kind; this.connect(); return; }
     const picker = window.google.picker;
-    const mimeTypes = kind === 'folder' ? folderMimeType : kind === 'pdf' ? pdfMimeType : 'text/csv,application/csv,text/plain,application/vnd.ms-excel,application/octet-stream';
+    const mimeTypes = kind === 'attachment' ? '' : kind === 'folder' ? folderMimeType : kind === 'pdf' ? pdfMimeType : 'text/csv,application/csv,text/plain,application/vnd.ms-excel,application/octet-stream';
     // Picker defaults to /favicon.ico for its parent-side RPC relay. Serve a
     // real same-origin HTML document instead of relying on a missing favicon.
     const relayUrl = new URL(`${import.meta.env.BASE_URL}google-picker-relay.html`, window.location.origin).href;
     // Deliberately log only lifecycle events, never tokens, document IDs or names.
     console.info('[Drive Picker] Opening', { kind, origin: window.location.origin, embedded: window.self !== window.top });
-    const makeView = () => new picker.DocsView(kind === 'folder' ? picker.ViewId.FOLDERS : picker.ViewId.DOCS)
-      .setIncludeFolders(true).setSelectFolderEnabled(kind === 'folder')
-      .setMimeTypes(mimeTypes).setMode(picker.DocsViewMode.LIST);
+    const makeView = () => {
+      const view = new picker.DocsView(kind === 'folder' ? picker.ViewId.FOLDERS : picker.ViewId.DOCS)
+        .setIncludeFolders(true).setSelectFolderEnabled(kind === 'folder').setMode(picker.DocsViewMode.LIST);
+      return mimeTypes ? view.setMimeTypes(mimeTypes) : view;
+    };
     const builder = new picker.PickerBuilder()
-      .setTitle(kind === 'pdf' ? 'Choose an exam PDF' : kind === 'csv' ? 'Choose a student CSV' : 'Choose an output folder')
+      .setTitle(kind === 'attachment' ? 'Choose a shared attachment' : kind === 'pdf' ? 'Choose an exam PDF' : kind === 'csv' ? 'Choose a student CSV' : 'Choose an output folder')
       .setDeveloperKey(googleConfig.apiKey!).setAppId(googleConfig.appId!)
       .setOAuthToken(this.token!.accessToken).setOrigin(window.location.origin)
-      .setRelayUrl(relayUrl)
-      .setSelectableMimeTypes(mimeTypes);
+      .setRelayUrl(relayUrl);
+    if (mimeTypes) builder.setSelectableMimeTypes(mimeTypes);
+    if (kind === 'attachment') builder.enableFeature(picker.Feature.MULTISELECT_ENABLED);
     if (kind === 'pdf') {
       // No parent restriction: expose Google's PDF listing across folders.
       // RECENTLY_PICKED is deprecated; listing order is controlled by Picker.
@@ -129,6 +171,8 @@ export class GoogleDrive {
         .setMimeTypes(pdfMimeType).setIncludeFolders(false)
         .setSelectFolderEnabled(false).setMode(picker.DocsViewMode.LIST));
     }
+    const studentFolder = kind === 'csv' ? this.studentFolder() : undefined;
+    if (studentFolder) builder.addView(makeView().setParent(studentFolder).setLabel('Last student list folder'));
     builder
       .addView(makeView().setParent('root')).addView(makeView().setEnableDrives(true))
       .setCallback(data => {
@@ -151,13 +195,14 @@ export class GoogleDrive {
             this.callbacks?.onError('Google Picker returned no selected item. Open the picker again, click the file or folder row, then click Select.');
             return;
           }
-          const item = { id: String(doc[picker.Document.ID] || ''), name: String(doc[picker.Document.NAME] || ''),
-            mimeType: String(doc[picker.Document.MIME_TYPE] || '') };
-          if (!item.id || (kind === 'csv' ? !/\.csv$/i.test(item.name) : item.mimeType !== (kind === 'pdf' ? pdfMimeType : folderMimeType))) {
-            this.callbacks?.onError(kind === 'pdf' ? 'Please select a PDF file.' : kind === 'csv' ? 'Please select a CSV file.' : 'Please select a folder.');
+          const selectedDocs = kind === 'attachment' ? documents as PickerDocument[] : [doc];
+          const items = selectedDocs.map(selected => ({ id: String(selected[picker.Document.ID] || ''), name: String(selected[picker.Document.NAME] || ''), mimeType: String(selected[picker.Document.MIME_TYPE] || '') }));
+          if (items.some(item => !item.id || (kind === 'attachment' ? item.mimeType === folderMimeType : kind === 'csv' ? !/\.csv$/i.test(item.name) : item.mimeType !== (kind === 'pdf' ? pdfMimeType : folderMimeType)))) {
+            this.callbacks?.onError(kind === 'attachment' ? 'Please select files.' : kind === 'pdf' ? 'Please select a PDF file.' : kind === 'csv' ? 'Please select a CSV file.' : 'Please select a folder.');
             return;
           }
-          this.callbacks?.onPick(kind, item);
+          if (kind === 'csv') void this.rememberStudentFolder(items[0], data[picker.Response.PARENTS]);
+          this.callbacks?.onPick(kind, items[0], items);
           console.info('[Drive Picker] Selection accepted', { kind });
         } catch {
           console.error('[Drive Picker] The app failed while handling a Picker callback.');
@@ -167,12 +212,31 @@ export class GoogleDrive {
   }
 
   async downloadPdf(item: DriveItem, signal: AbortSignal, onProgress?: (received: number, total?: number) => void): Promise<Uint8Array> {
+    return this.downloadFile(item, signal, onProgress);
+  }
+
+  async downloadAttachment(item: DriveItem, signal: AbortSignal, onProgress?: (received: number, total?: number) => void): Promise<File> {
+    const native = item.mimeType.startsWith('application/vnd.google-apps.');
+    if (native && !['document', 'spreadsheet', 'presentation', 'drawing'].some(type => item.mimeType === `application/vnd.google-apps.${type}`)) throw new Error('This Google Drive item cannot be attached. Choose a downloadable file or a Google document, sheet, slide deck or drawing.');
+    let bytes: Uint8Array;
+    if (native) {
+      const response = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}/export?mimeType=application%2Fpdf`, { signal });
+      bytes = new Uint8Array(await response.arrayBuffer());
+      signal.throwIfAborted();
+      onProgress?.(bytes.length, bytes.length);
+    } else bytes = await this.downloadFile(item, signal, onProgress, 25_000_000);
+    if (!bytes.length || bytes.length >= 25_000_000) throw new Error('Choose a non-empty attachment smaller than 25 MB, leaving space for the exam PDF.');
+    return new File([bytes as Uint8Array<ArrayBuffer>], native && !/\.pdf$/i.test(item.name) ? `${item.name}.pdf` : item.name, { type: native ? pdfMimeType : item.mimeType || 'application/octet-stream' });
+  }
+
+  private async downloadFile(item: DriveItem, signal: AbortSignal, onProgress?: (received: number, total?: number) => void, maxBytes = Infinity): Promise<Uint8Array> {
     signal.throwIfAborted();
     onProgress?.(0);
     const fileUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}`;
     const metadataResponse = await this.request(`${fileUrl}?fields=size&supportsAllDrives=true`, { signal });
     const metadata = await metadataResponse.json() as { size?: string };
     const fileSize = Number(metadata.size);
+    if (fileSize >= maxBytes) throw new Error('Shared attachment must be smaller than 25 MB.');
     const metadataTotal = Number.isSafeInteger(fileSize) && fileSize > 0 ? fileSize : undefined;
     signal.throwIfAborted();
     onProgress?.(0, metadataTotal);
@@ -203,6 +267,7 @@ export class GoogleDrive {
         if (done) break;
         chunks.push(value);
         received += value.length;
+        if (received >= maxBytes) throw new Error('Shared attachment must be smaller than 25 MB.');
         if (total !== undefined && received > total) total = undefined;
         const now = performance.now();
         if (now - lastReport >= 100) {
@@ -218,7 +283,7 @@ export class GoogleDrive {
     } catch (error) {
       await reader.cancel().catch(() => {});
       signal.throwIfAborted();
-      throw new Error('PDF download failed. Check your connection and retry. ' + (error instanceof Error ? error.message : ''));
+      throw new Error('File download failed. Check your connection and retry. ' + (error instanceof Error ? error.message : ''));
     } finally {
       signal.removeEventListener('abort', abort);
       reader.releaseLock();

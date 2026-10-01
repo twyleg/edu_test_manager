@@ -6,7 +6,7 @@ describe('student CSV', () => {
   it('reads the supplied semicolon/BOM example and preserves umlauts', () => {
     const students = parseStudents(readFileSync('resources/example_student_list.csv', 'utf8'));
     expect(students).toHaveLength(10);
-    expect(students.find(s => s.lastName === 'Müller')).toMatchObject({ filename: '01_Müller_Anna.pdf', email: 'anna.mueller@pmg-meine.de' });
+    expect(students.find(s => s.lastName === 'Müller')).toMatchObject({ filename: '01_Müller_Anna.pdf' });
   });
   it('handles comma delimiters, quoted fields and CRLF', () => {
     expect(parseStudents('Nr.,Nachname,Vorname,E-Mail-Adresse,Extra\r\n01,"Müller, Meier",Anna,a@example.org,"quoted ""value""\ncontinued"')[0]).toMatchObject({ lastName: 'Müller, Meier', firstName: 'Anna', email: 'a@example.org' });

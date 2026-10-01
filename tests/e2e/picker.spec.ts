@@ -43,3 +43,26 @@ test('empty selection displays an error and cancel releases the controls', async
   await expect(page.getByRole('button', { name: 'Choose PDF from Drive' })).toBeEnabled();
   await expect(page.locator('.file-selection').first()).toContainText('No PDF selected');
 });
+
+test('remembers the student CSV folder across tasks and reloads without changing other pickers', async ({ page }) => {
+  await mockGoogleUi(page, true);
+  const parents = () => page.evaluate(() => (window as unknown as { __mockPickerParents: (string | null)[] }).__mockPickerParents);
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Match students', exact: true }).click();
+  await page.locator('#match-csv').click();
+  expect((await parents())[0]).toBe('root');
+  let dialog = page.getByRole('dialog', { name: 'Choose a student CSV' });
+  await dialog.getByRole('button', { name: 'students.csv', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Select', exact: true }).click();
+  expect(await page.evaluate(() => localStorage.getItem('edu-test-manager-student-list-folder'))).toBe('student-list-folder');
+  await page.reload();
+  await page.getByRole('tab', { name: 'Prepare drafts', exact: true }).click();
+  await page.locator('#draft-csv').click();
+  expect(await parents()).toEqual(['student-list-folder', 'root', null]);
+  dialog = page.getByRole('dialog', { name: 'Choose a student CSV' });
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.locator('#draft-folder').click();
+  expect((await parents())[0]).toBe('root');
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(await page.evaluate(() => localStorage.getItem('edu-test-manager-student-list-folder'))).toBe('student-list-folder');
+});

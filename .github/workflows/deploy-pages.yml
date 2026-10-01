@@ -1,0 +1,57 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    env:
+      VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+      VITE_GOOGLE_API_KEY: ${{ vars.VITE_GOOGLE_API_KEY }}
+      VITE_GOOGLE_APP_ID: ${{ vars.VITE_GOOGLE_APP_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Check public Google configuration
+        run: |
+          node --input-type=module <<'JS'
+          for (const key of ['VITE_GOOGLE_CLIENT_ID', 'VITE_GOOGLE_API_KEY', 'VITE_GOOGLE_APP_ID']) {
+            if (!process.env[key]?.trim() || process.env[key].startsWith('your-')) throw new Error(`Set repository variable ${key} before deploying.`);
+          }
+          if (!/^\d+$/.test(process.env.VITE_GOOGLE_APP_ID)) throw new Error('VITE_GOOGLE_APP_ID must be the numeric Cloud project number.');
+          JS
+      - run: npm test
+      - run: npm run build:pages
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

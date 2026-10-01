@@ -39,7 +39,7 @@ export class BatchSendTask {
       const drafts = await this.gmail.listBatchDrafts(this.controller!.signal);
       this.rows = drafts.map(draft => ({ draft, selected: false, status: this.outcomes.get(this.key(draft.id)) || '', blocked: this.outcomes.has(this.key(draft.id)) }));
       this.loaded = true; this.expanded = { load: false, review: true };
-      this.message = drafts.length ? `Found ${drafts.length} drafts. Select the messages to send.` : 'No drafts found for Gmail label bulk-send. Gmail does not support custom labels on draft messages; a label on a conversation may not include its draft.';
+      this.message = drafts.length ? `Found ${drafts.length} drafts. Select the messages to send.` : 'No drafts found for Gmail label bulk-send. Apply bulk-send in Gmail or Prepare drafts, then reload. Newly applied labels may take time to appear.';
     } catch (error) { this.error = this.controller?.signal.aborted ? '' : (error as Error).message; this.message = this.controller?.signal.aborted ? 'Loading cancelled.' : ''; }
     finally { this.end(); }
   }
@@ -112,7 +112,7 @@ export class BatchSendTask {
       <div class="intro"><div><p class="eyebrow">BATCH SEND</p><h1>Send the drafts you select.</h1><p class="lead-copy">Find drafts using the Gmail label <strong>bulk-send</strong>, then review the recipients before sending.</p></div></div>
       <div role="alert" class="alert alert-danger" ${this.error ? '' : 'hidden'}>${html(this.error)}</div>
       ${section('load', 1, 'Load labeled drafts', this.account || 'Connect your Gmail account')}
-      <div class="draft-editor"><p>Uses Gmail’s label search <code>label:bulk-send</code>. Subject tags are not used. Gmail does not support custom labels on draft messages, so this search may return no drafts.</p>
+      <div class="draft-editor"><p>Uses Gmail’s label search <code>label:bulk-send</code>. Subject tags are not used. Apply bulk-send in Prepare drafts or Gmail. Newly applied labels may take time to appear.</p>
       ${!this.google.draftsAccess ? `<button id="send-access" class="btn btn-outline-primary" ${disabled(this.busy || !ready)}>Enable Gmail access</button>` : ''}
       <button id="send-load" class="btn btn-primary" ${disabled(this.busy || !this.google.draftsAccess)}>Load drafts</button></div></div></section>
       ${section('review', 2, 'Select & send', this.loaded ? `${count} of ${this.rows.length} drafts selected` : 'Available after loading')}

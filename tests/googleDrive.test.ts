@@ -100,7 +100,7 @@ describe('Drive download progress', () => {
       if (!reads++) c.enqueue(new Uint8Array([1])); else c.error(new Error('Connection lost'));
     } });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({})).mockResolvedValueOnce(new Response(stream)));
-    await expect(authorizedDrive().downloadPdf(item, new AbortController().signal)).rejects.toThrow('PDF download failed. Check your connection and retry.');
+    await expect(authorizedDrive().downloadPdf(item, new AbortController().signal)).rejects.toThrow('File download failed. Check your connection and retry.');
   });
 });
 

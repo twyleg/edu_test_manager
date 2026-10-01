@@ -19,12 +19,11 @@ describe('draft templates and file matching', () => {
     expect(rows[2].issue).toContain('email');
     expect(rows[3].issue).toContain('Filename');
   });
-  it('prepares subject tags and rejects subject header injection', () => {
+  it('prepares subjects and rejects subject header injection', () => {
     const rows = planDrafts([{ id: '1', name: student.filename, mimeType: 'application/pdf' }], students);
-    prepareDraftRows(rows, 'Test für {{Vorname}}', 'Hallo {{Vorname}}', '8A, Informatik');
-    expect(rows[0].subject).toBe('[8A] [Informatik] Test für Anna');
-    expect(() => prepareDraftRows(rows, 'Hello\r\nBcc: other@example.org', '', '')).toThrow('line breaks');
-    expect(() => prepareDraftRows(rows, 'Hello', '', '8A\nBcc: other')).toThrow('tags');
+    prepareDraftRows(rows, 'Test für {{Vorname}}', 'Hallo {{Vorname}}');
+    expect(rows[0].subject).toBe('Test für Anna');
+    expect(() => prepareDraftRows(rows, 'Hello\r\nBcc: other@example.org', '')).toThrow('line breaks');
   });
 });
 
@@ -49,3 +48,11 @@ describe('MIME PDF attachments', () => {
     expect(validEmail('anna@example.org\r\nBcc: bob@example.org')).toBe(false);
   });
 });
+
+ it('limits the combined attachments and sanitizes attachment MIME headers', () => {
+   const content = { from: 'teacher@example.org', to: 'student@example.org', subject: 'Exam', body: '', filename: 'exam.pdf', bytes: new Uint8Array([1]), messageId: 'test@edu-test-manager.invalid' };
+   expect(() => buildDraftMime({ ...content, extraAttachments: [{ filename: 'large.bin', mimeType: '', bytes: new Uint8Array(25_000_000) }] })).toThrow('Combined attachments');
+   const mime = buildDraftMime({ ...content, extraAttachments: [{ filename: 'file.bin', mimeType: 'text/plain\r\nBcc: injected@example.org', bytes: new Uint8Array([255]) }] });
+   expect(mime).toContain('Content-Type: application/octet-stream');
+   expect(mime).not.toContain('Bcc:');
+ });

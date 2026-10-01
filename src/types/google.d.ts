@@ -72,6 +72,7 @@ declare global {
     const Response: {
       ACTION: string;
       DOCUMENTS: string;
+      PARENTS: string;
     };
     const ViewId: {
       DOCS_IMAGES: string;
@@ -82,6 +83,7 @@ declare global {
 
     class DocsView {
       constructor(viewId: string);
+      setLabel(label: string): DocsView;
       setEnableDrives(enabled: boolean): DocsView;
       setIncludeFolders(includeFolders: boolean): DocsView;
       setMode(mode: string): DocsView;

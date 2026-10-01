@@ -2,20 +2,22 @@ import { GoogleDrive, GoogleHttpError } from './googleDrive';
 import { Gmail } from './gmail';
 import type { DriveItem } from './types';
 import { parseStudents, type Student } from './students';
-import { buildDraftMime, encodeDraft } from './email';
+import { buildDraftMime, encodeDraft, type Attachment } from './email';
 import { planDrafts, prepareDraftRows, type DraftRow } from './draftPlan';
 
 const html = (value: string) => value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 export class DraftTask {
   folder?: DriveItem;
   csv?: DriveItem;
-  private picker?: 'folder' | 'csv';
+  private picker?: 'folder' | 'csv' | 'attachment';
   private students: Student[] = [];
   private rows: DraftRow[] = [];
   private account = '';
   private subject = 'Deine Klassenarbeit';
   private body = 'Hallo {{Vorname}},\n\nim Anhang findest du deine korrigierte Klassenarbeit.\n\nViele Grüße';
-  private tags = '';
+  private labels = 'bulk-send';
+  private labelNames: string[] = [];
+  private extraFiles: File[] = [];
   private expanded = { setup: true, compose: false, review: false };
   private prepared = false;
   private started = false;
@@ -29,13 +31,16 @@ export class DraftTask {
   private gmail: Gmail;
   constructor(private google: GoogleDrive, private refresh: () => void, private setBusy: (busy: boolean) => void) { this.gmail = new Gmail(google); }
   prefill(folder?: DriveItem, csv?: DriveItem): void { this.folder ??= folder; this.csv ??= csv; }
-  get hasIncompleteBatch(): boolean { return this.started && this.rows.some(row => row.included && !row.draftId); }
+  private complete(row: DraftRow): boolean { return Boolean(row.draftId && (!this.labelNames.length || row.labelsApplied)); }
+  get hasIncompleteBatch(): boolean { return this.started && this.rows.some(row => row.included && !this.complete(row)); }
   reset(): void {
+    this.extraFiles = []; this.labelNames = []; this.labels = 'bulk-send';
     this.folder = this.csv = undefined; this.students = []; this.rows = []; this.account = '';
     this.prepared = this.started = false; this.expanded = { setup: true, compose: false, review: false }; this.message = this.error = '';
   }
-  pick(kind: 'folder' | 'csv'): void { this.picker = kind; this.google.openPicker(kind); }
-  accept(item: DriveItem): void {
+  pick(kind: 'folder' | 'csv' | 'attachment'): void { this.picker = kind; this.google.openPicker(kind); }
+  accept(item: DriveItem, items: DriveItem[] = [item]): void {
+    if (this.picker === 'attachment') { this.picker = undefined; void this.loadAttachments(items); return; }
     if (this.picker === 'folder') this.folder = item; else this.csv = item;
     this.picker = undefined; this.rows = []; this.students = []; this.prepared = false; this.error = this.message = ''; this.expanded = { setup: true, compose: false, review: false };
   }
@@ -77,12 +82,50 @@ export class DraftTask {
     if (this.busy || this.started) return;
     if (id === 'draft-subject') this.subject = value;
     if (id === 'draft-body') this.body = value;
-    if (id === 'draft-tags') this.tags = value;
+    if (id === 'draft-labels') this.labels = value;
     this.prepared = false; this.expanded.review = false;
     // Keep the editor mounted while typing; remove the stale review immediately.
     const review = document.getElementById('draft-review-body'); if (review) review.hidden = true;
     const toggle = document.getElementById('draft-toggle-review') as HTMLButtonElement | null;
     if (toggle) { toggle.disabled = true; toggle.setAttribute('aria-expanded', 'false'); }
+  }
+  private validateAttachments(files: File[]): void {
+    if (files.some(file => !file.size)) throw new Error('Cannot attach an empty file.');
+    if (files.reduce((total, file) => total + file.size, 0) >= 25_000_000) throw new Error('Shared attachments must total less than 25 MB, leaving space for each exam PDF.');
+  }
+  private async loadAttachments(items: DriveItem[]): Promise<void> {
+    if (this.busy || this.started) return;
+    this.begin('Downloading shared attachments…');
+    const downloaded: File[] = [];
+    try {
+      for (const [index, item] of items.entries()) {
+        const file = await this.google.downloadAttachment(item, this.controller!.signal, (received, total) => {
+          this.progress = total ? (index + Math.min(1, received / total)) / items.length * 100 : null;
+          this.message = `Downloading shared attachment ${index + 1} of ${items.length}: ${item.name}… ${(received / 1048576).toFixed(1)} MB${total ? ` of ${(total / 1048576).toFixed(1)} MB` : ''}`;
+          this.progressUpdate();
+        });
+        downloaded.push(file);
+        this.validateAttachments([...this.extraFiles, ...downloaded]);
+      }
+      this.extraFiles.push(...downloaded); this.prepared = false; this.expanded.review = false;
+      this.message = `${downloaded.length} shared attachments added.`;
+    } catch (error) {
+      this.error = this.controller?.signal.aborted ? '' : (error as Error).message;
+      this.message = 'No files from this selection were added. Existing attachments were kept.';
+    } finally { this.end(); }
+  }
+  attachments(files: File[]): void {
+    if (this.busy || this.started) return;
+    this.error = '';
+    try {
+      this.validateAttachments([...this.extraFiles, ...files]);
+      this.extraFiles.push(...files); this.prepared = false; this.expanded.review = false;
+    } catch (error) { this.error = (error as Error).message; }
+    this.refresh();
+  }
+  private removeAttachment(index: number): void {
+    if (this.busy || this.started || !Number.isInteger(index) || !this.extraFiles[index]) return;
+    this.extraFiles.splice(index, 1); this.prepared = false; this.expanded.review = false; this.error = ''; this.refresh();
   }
   select(index: number, included: boolean): void {
     if (this.busy || this.started || !this.rows[index] || this.rows[index].issue) return;
@@ -91,7 +134,11 @@ export class DraftTask {
   prepare(): void {
     if (this.busy || this.started) return;
     try {
-      prepareDraftRows(this.rows, this.subject, this.body, this.tags);
+      this.labelNames = [...new Set(this.labels.split(',').map(name => name.trim()).filter(Boolean))];
+      if (this.labelNames.some(name => /[\r\n\u0000]/.test(name))) throw new Error('Enter label names separated by commas without line breaks.');
+      if (this.labelNames.length > 100) throw new Error('Use at most 100 labels.');
+      if (this.labelNames.length && !this.google.gmailLabelsAccess) throw new Error('Enable Gmail labels before previewing.');
+      prepareDraftRows(this.rows, this.subject, this.body);
       this.prepared = true; this.error = ''; this.expanded = { setup: false, compose: false, review: true };
       this.message = 'Review each recipient, expanded message and PDF attachment before creating drafts.';
     } catch (error) { this.error = (error as Error).message; }
@@ -103,10 +150,13 @@ export class DraftTask {
     try {
       const account = await this.gmail.account();
       if (account !== this.account) throw new Error('The Gmail account changed. Reconnect the account shown in the preview before continuing.');
+      if (this.labelNames.length && !this.google.gmailLabelsAccess) throw new Error('Enable Gmail labels before continuing.');
       this.started = true;
+      const labelIds = await this.gmail.ensureLabels(this.labelNames);
+      const extraAttachments: Attachment[] = await Promise.all(this.extraFiles.map(async file => ({ filename: file.name, mimeType: file.type || 'application/octet-stream', bytes: new Uint8Array(await file.arrayBuffer()) })));
       const selected = this.rows.filter(row => row.included);
       for (const [index, row] of selected.entries()) {
-        if (row.draftId) continue;
+        if (this.complete(row)) continue;
         if (this.stopRequested) break;
         row.error = undefined;
         row.messageId ??= `${crypto.randomUUID()}@edu-test-manager.invalid`;
@@ -116,37 +166,44 @@ export class DraftTask {
           if (row.uncertain) {
             const existing = await this.gmail.findDraft(row.messageId);
             if (!existing) throw new Error('Gmail has not confirmed the previous attempt. Check Gmail Drafts, then retry the status check. No duplicate will be created automatically.');
-            row.draftId = existing.id; row.uncertain = false; continue;
+            row.draftId = existing.id; row.uncertain = false;
           }
-          const bytes = await this.google.downloadPdf(row.file, this.controller!.signal, (received, total) => {
-            this.progress = (index + (total ? Math.min(1, received / total) * .7 : 0)) / selected.length * 100;
-            this.message = `Downloading attachment ${index + 1} of ${selected.length}… ${(received / 1048576).toFixed(1)} MB${total ? ` of ${(total / 1048576).toFixed(1)} MB` : ''}`;
-            this.progressUpdate();
-          });
-          if (this.stopRequested) break;
-          const raw = encodeDraft(buildDraftMime({ from: this.account, to: row.student!.email, subject: row.subject!, body: row.body!, filename: row.file.name, bytes, messageId: row.messageId }));
-          this.message = `Saving draft ${index + 1} of ${selected.length} in Gmail…`; this.progress = (index + .8) / selected.length * 100; this.progressUpdate();
-          row.uncertain = true;
-          try {
-            const draft = await this.gmail.create(raw);
-            row.draftId = draft.id; row.uncertain = false;
-          } catch (error) {
-            if (error instanceof GoogleHttpError && error.status >= 400 && error.status < 500 && error.status !== 408) row.uncertain = false;
-            throw error;
+          if (!row.draftId) {
+            const bytes = await this.google.downloadPdf(row.file, this.controller!.signal, (received, total) => {
+              this.progress = (index + (total ? Math.min(1, received / total) * .7 : 0)) / selected.length * 100;
+              this.message = `Downloading attachment ${index + 1} of ${selected.length}… ${(received / 1048576).toFixed(1)} MB${total ? ` of ${(total / 1048576).toFixed(1)} MB` : ''}`;
+              this.progressUpdate();
+            });
+            if (this.stopRequested) break;
+            const raw = encodeDraft(buildDraftMime({ from: this.account, to: row.student!.email, subject: row.subject!, body: row.body!, filename: row.file.name, bytes, messageId: row.messageId, extraAttachments }));
+            this.message = `Saving draft ${index + 1} of ${selected.length} in Gmail…`; this.progress = (index + .8) / selected.length * 100; this.progressUpdate();
+            row.uncertain = true;
+            try {
+              const draft = await this.gmail.create(raw);
+              row.draftId = draft.id; row.uncertain = false;
+            } catch (error) {
+              if (error instanceof GoogleHttpError && error.status >= 400 && error.status < 500 && error.status !== 408) row.uncertain = false;
+              throw error;
+            }
           }
+          this.message = `Applying labels to draft ${index + 1} of ${selected.length}…`; this.progressUpdate();
+          await this.gmail.labelDraft(row.draftId!, labelIds);
+          row.labelsApplied = true;
         } catch (error) { row.error = (error as Error).message; throw error; }
       }
-      const done = selected.filter(row => row.draftId).length;
+      const done = selected.filter(row => this.complete(row)).length;
       this.progress = done / selected.length * 100;
       this.message = `${done} of ${selected.length} drafts saved in Gmail. Nothing was sent.${this.stopRequested ? ' Resume when ready.' : ''}`;
       if (done === selected.length) this.expanded.review = false;
     } catch (error) {
       this.error = (error as Error).message;
-      this.message = `${this.rows.filter(row => row.draftId).length} drafts saved. Saved drafts will be skipped on retry.`;
+      this.message = `${this.rows.filter(row => row.draftId).length} drafts saved. Retry resumes missing drafts or labels without recreating saved drafts.`;
     } finally { this.end(); }
   }
   handle(id: string): boolean {
+    if (id.startsWith('draft-extra-remove-')) { this.removeAttachment(Number(id.slice('draft-extra-remove-'.length))); return true; }
     switch (id) {
+      case 'draft-label-access': this.google.connectDrafts(true); break;
       case 'draft-access': this.google.connectDrafts(); break;
       case 'draft-load': void this.load(); break;
       case 'draft-prepare': this.prepare(); break;
@@ -166,7 +223,7 @@ export class DraftTask {
     const disabled = (value: boolean) => value ? 'disabled' : '';
     const locked = this.busy || this.started;
     const selected = this.rows.filter(row => row.included);
-    const done = selected.filter(row => row.draftId).length;
+    const done = selected.filter(row => this.complete(row)).length;
     const section = (key: 'setup' | 'compose' | 'review', number: number, title: string, summary: string, available: boolean) => `<section class="subtask workspace-panel ${this.busy ? 'subtask-busy' : ''}"><h2 class="subtask-heading"><button id="draft-toggle-${key}" aria-controls="draft-${key}-body" aria-expanded="${this.expanded[key]}" ${disabled(this.busy || !available)}><span class="step-number">${number}</span><span class="subtask-title">${title}<small>${html(summary)}</small></span><span aria-hidden="true">${this.expanded[key] ? '⌃' : '⌄'}</span></button></h2><div id="draft-${key}-body" class="subtask-body" ${this.expanded[key] ? '' : 'hidden'}>`;
     return `<section id="panel-drafts" role="tabpanel" aria-labelledby="task-drafts">
       <div class="intro"><div><p class="eyebrow">PREPARE DRAFTS</p><h1>Ready for your final check.</h1><p class="lead-copy">Create a Gmail draft for each student with their exam attached. Review and send later in Gmail.</p></div></div>
@@ -181,13 +238,17 @@ export class DraftTask {
       ${section('compose', 2, 'Choose files & write template', this.rows.length ? `${selected.length} of ${this.rows.length} PDFs selected` : 'Available after loading', this.rows.length > 0)}
         <div class="draft-editor"><p>Gmail account: <strong>${html(this.account)}</strong></p><div class="draft-file-list">${this.rows.map((row, index) => `<label class="matching-file-row"><input id="draft-file-${index}" data-draft-file="${index}" type="checkbox" ${row.included ? 'checked' : ''} ${disabled(locked || Boolean(row.issue))} /><span><strong>${html(row.file.name)}</strong><small>${html(row.issue || row.student!.email)}</small></span></label>`).join('')}</div>
         <label for="draft-subject" class="form-label">Subject template</label><input id="draft-subject" class="form-control" value="${html(this.subject)}" ${disabled(locked)} />
-        <label for="draft-tags" class="form-label">Optional subject tags</label><input id="draft-tags" class="form-control" placeholder="8A, Informatik" value="${html(this.tags)}" ${disabled(locked)} /><p class="form-text">Added as [8A] [Informatik]. Gmail does not support custom labels on drafts through its API.</p>
+        <label for="draft-labels" class="form-label">Gmail labels (comma-separated)</label><input id="draft-labels" class="form-control" placeholder="bulk-send, 8A, Informatik" value="${html(this.labels)}" ${disabled(locked)} /><p class="form-text">Applied to every draft. Missing labels are created. Use bulk-send to find these drafts in Batch send; Gmail may take time to display labels.</p>
+        ${!this.google.gmailLabelsAccess ? `<button id="draft-label-access" class="btn btn-outline-primary" ${disabled(this.busy || !ready)}>Enable Gmail labels</button>` : ''}
         <label for="draft-body" class="form-label">Message template</label><textarea id="draft-body" class="form-control" rows="8" ${disabled(locked)}>${html(this.body)}</textarea><p class="form-text">Use CSV column names in double braces: {{Vorname}}, {{Nachname}}, {{Nr.}}, {{E-Mail-Adresse}}. Plain text only. Unknown placeholders are reported before creation.</p>
+        <label for="draft-extra" class="form-label">Shared attachments for all students</label><input id="draft-extra" type="file" multiple class="form-control" ${disabled(locked)} /><button id="draft-extra-drive" class="btn btn-outline-primary" ${disabled(locked || !ready)}>Add attachments from Drive</button><p class="form-text">Add files from your computer or Google Drive. Google documents are attached as PDFs. Each draft includes its exam PDF and all shared files, up to 25 MB combined.</p>
+        ${this.extraFiles.map((file, index) => `<p class="shared-attachment">${html(file.name)} · ${(file.size / 1048576).toFixed(2)} MB <button id="draft-extra-remove-${index}" class="btn btn-sm btn-outline-secondary" aria-label="Remove ${html(file.name)}" ${disabled(locked)}>Remove</button></p>`).join('')}
+
         <button id="draft-prepare" class="btn btn-primary" ${disabled(locked || !selected.length)}>Preview drafts</button></div>
       </div></section>
       ${section('review', 3, 'Review & create drafts', this.prepared ? `${done} of ${selected.length} saved` : 'Available after previewing the template', this.prepared)}
         <div class="draft-editor"><p>Sender: <strong>${html(this.account)}</strong>. Each PDF is attached directly to its student’s draft.</p>
-        ${this.prepared ? selected.map(row => `<article class="draft-preview"><h3>${html(row.file.name)}</h3><p><strong>To:</strong> ${html(row.student!.email)}</p><p><strong>Subject:</strong> ${html(row.subject!)}</p><pre>${html(row.body!)}</pre><p>Attachment: ${html(row.file.name)} · application/pdf</p><p>${row.draftId ? 'Saved in Gmail Drafts' : row.uncertain ? 'Checking whether Gmail saved this draft' : 'Not created yet'}</p>${row.error ? `<p class="text-danger">${html(row.error)}</p>` : ''}</article>`).join('') : ''}
+        ${this.prepared ? selected.map(row => `<article class="draft-preview"><h3>${html(row.file.name)}</h3><p><strong>To:</strong> ${html(row.student!.email)}</p><p><strong>Subject:</strong> ${html(row.subject!)}</p><pre>${html(row.body!)}</pre><p>Attachment: ${html(row.file.name)} · application/pdf</p>${this.extraFiles.map(file => `<p>Shared attachment: ${html(file.name)}</p>`).join('')}<p>Gmail labels: ${html(this.labelNames.join(', ') || 'None')}</p><p>${row.draftId ? this.complete(row) ? 'Saved in Gmail Drafts' : 'Draft saved; labels pending' : row.uncertain ? 'Checking whether Gmail saved this draft' : 'Not created yet'}</p>${row.error ? `<p class="text-danger">${html(row.error)}</p>` : ''}</article>`).join('') : ''}
         <button id="draft-create" class="btn btn-primary" ${disabled(this.busy || !this.prepared || !this.google.draftsAccess || done === selected.length)}>${this.started ? 'Retry / resume remaining drafts' : `Create ${selected.length} drafts in Gmail`}</button></div>
       </div></section>
       <div id="draft-progress" tabindex="-1" class="progress-area ${this.busy ? 'progress-active progress-island' : this.started && done === selected.length ? 'matching-complete' : ''}" ${this.message ? '' : 'hidden'}><div class="progress-caption"><span role="status" aria-live="polite">${html(this.message)}</span>${this.busy ? `<button id="draft-stop" class="btn btn-sm btn-outline-secondary">${this.saving ? 'Stop after this draft' : 'Cancel loading'}</button>` : ''}</div>${this.busy ? `<div class="progress ${this.progress === null ? 'progress-indeterminate' : ''}" role="progressbar" aria-label="Draft progress" ${this.progress === null ? '' : `aria-valuenow="${Math.round(this.progress)}"`} aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:${this.progress === null ? 35 : this.progress}%"></div></div>` : ''}</div>
