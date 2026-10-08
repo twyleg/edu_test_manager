@@ -1,16 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { folderMimeType, pdfMimeType } from '../src/config';
-import { PreparationJob, nextTestFolderName, scanFilename, topicSlug, type PreparationInput } from '../src/preparation';
+import { ImportJob, nextTestFolderName, scanFilename, topicSlug, type ImportInput } from '../src/preparation';
+import { TestCreationJob, FolderJob, missingCourseFolders } from '../src/testStructure';
 import type { GoogleDrive } from '../src/googleDrive';
 import type { DriveItem } from '../src/types';
 
 const folder = (id: string, name = id): DriveItem => ({ id, name, mimeType: folderMimeType });
-const input: PreparationInput = { inputFolder: folder('input'), courseFolder: folder('course', '8a'),
+const course = folder('course', '8a');
+const input: ImportInput = { inputFolder: folder('input'), test: folder('test', 'LZKs / 01_Zahlen-Konvertieren-Dezimal-Dual'),
   scan: { id: 'scan', name: 'scanner.pdf', mimeType: pdfMimeType }, course: '8a', subject: 'Informatik',
   type: 'LZK', topic: 'Zahlen Konvertieren Dezimal Dual', date: '2026-10-03' };
 
 function fakeDrive() {
-  const items = new Map<string, DriveItem>([['course', input.courseFolder], ['input', input.inputFolder], ['scan', input.scan]]);
+  const items = new Map<string, DriveItem>([['course', course], ['test', input.test], ['input', input.inputFolder], ['scan', input.scan]]);
   const parents = new Map<string, string>([['scan', 'input']]);
   let serial = 0;
   const api = {
@@ -51,35 +53,38 @@ describe('preparation names', () => {
   });
 });
 
-describe('preparation workflow', () => {
-  it('creates the full hierarchy and copies the original scan only after all folders exist', async () => {
-    const { api, drive, items, parents } = fakeDrive();
-    api.copyScan.mockImplementationOnce(async (scan, source, destination, name, copyId) => {
-      expect([...items.values()].map(item => item.name)).toEqual(expect.arrayContaining(['LZKs', 'Klausuren', '01_Zahlen-Konvertieren-Dezimal-Dual', '01_Scans', '02_Korrigiert', '03_Split', '04_Previews']));
-      expect(source).toBe('input'); const copy = { ...scan, id: copyId, name }; items.set(copyId, copy); parents.set(copyId, destination); return copy;
-    });
-    const result = await new PreparationJob(input).run(drive);
-    expect(parents.get(result.previews.id)).toBe(result.test.id);
-    expect(parents.get(result.test.id)).toBe([...items.values()].find(item => item.name === 'LZKs')!.id);
-    expect(parents.get('scan')).toBe('input');
-    expect(items.get('scan')!.name).toBe('scanner.pdf');
-    expect(result.scan.id).not.toBe('scan');
-    expect(parents.get(result.scan.id)).toBe(result.scans.id);
-    expect(items.get(result.scan.id)!.name).toBe('20261003_LZK-IF8a-Zahlen-Konvertieren-Dezimal-Dual.pdf');
-    expect(api.copyScan).toHaveBeenCalledTimes(1);
+describe('test setup and scan import', () => {
+  async function setup(drive: GoogleDrive) {
+    const job = new FolderJob();
+    for (const name of ['LZKs', 'Klausuren']) await job.ensure(drive, course, name);
+  }
+  it('checks missing course folders without writing anything', async () => {
+    const { api, drive } = fakeDrive();
+    expect(await missingCourseFolders(drive, course)).toEqual(['LZKs', 'Klausuren']);
+    expect(api.createFolder).not.toHaveBeenCalled();
+    await setup(drive);
+    expect(await missingCourseFolders(drive, course)).toEqual([]);
   });
-  it('reuses existing type folders and numbers Klausuren independently', async () => {
+  it('creates the test and its subfolders independently of scan import', async () => {
+    const { api, drive, items, parents } = fakeDrive();
+    await setup(drive);
+    const test = await new TestCreationJob(course, 'LZK', input.topic).run(drive);
+    expect(test.name).toBe('LZKs / 01_Zahlen-Konvertieren-Dezimal-Dual');
+    expect([...items.values()].filter(item => parents.get(item.id) === test.id).map(item => item.name)).toEqual(['01_Scans', '02_Korrigiert', '03_Split', '04_Previews']);
+    expect(api.copyScan).not.toHaveBeenCalled();
+  });
+  it('numbers Klausuren independently and leaves existing folders alone', async () => {
     const { drive, items, parents } = fakeDrive();
     for (const item of [folder('lzk', 'LZKs'), folder('ka', 'Klausuren')]) { items.set(item.id, item); parents.set(item.id, 'course'); }
     items.set('old', folder('old', '03_Old')); parents.set('old', 'ka');
     items.set('lzk-old', folder('lzk-old', '99_Old')); parents.set('lzk-old', 'lzk');
-    const result = await new PreparationJob({ ...input, type: 'Klausur' }).run(drive);
-    expect(result.test.name).toBe('04_Zahlen-Konvertieren-Dezimal-Dual');
-    expect(parents.get(result.test.id)).toBe('ka');
-    expect([...items.values()].filter(item => item.name === 'LZKs')).toHaveLength(1);
+    const test = await new TestCreationJob(course, 'Klausur', input.topic).run(drive);
+    expect(test.name).toBe('Klausuren / 04_Zahlen-Konvertieren-Dezimal-Dual');
+    expect(parents.get(test.id)).toBe('ka');
   });
-  it('resumes with the same folder IDs after a successful creation loses its response', async () => {
+  it('resumes creation using the same IDs after a lost response', async () => {
     const { api, drive, items } = fakeDrive();
+    await setup(drive);
     const create = api.createFolder.getMockImplementation()!;
     let lost = false;
     api.createFolder.mockImplementation(async (id, name, parent) => {
@@ -87,34 +92,48 @@ describe('preparation workflow', () => {
       if (name === '01_Scans' && !lost) { lost = true; throw new Error('Lost response'); }
       return result;
     });
-    const job = new PreparationJob(input);
+    const job = new TestCreationJob(course, 'LZK', input.topic);
     await expect(job.run(drive)).rejects.toThrow('Lost response');
-    expect(api.copyScan).not.toHaveBeenCalled();
-    const result = await job.run(drive);
-    expect(result.test.name).toBe('01_Zahlen-Konvertieren-Dezimal-Dual');
+    await job.run(drive);
     expect([...items.values()].filter(item => item.name === '01_Scans')).toHaveLength(1);
     expect([...items.values()].filter(item => /^\d+_Zahlen/.test(item.name))).toHaveLength(1);
   });
-  it('leaves the scan alone when a required name is ambiguous', async () => {
+  it('rejects ambiguous category names without creating folders', async () => {
     const { api, drive, items, parents } = fakeDrive();
     for (const id of ['one', 'two']) { items.set(id, folder(id, 'LZKs')); parents.set(id, 'course'); }
-    await expect(new PreparationJob(input).run(drive)).rejects.toThrow('duplicate');
-    expect(api.copyScan).not.toHaveBeenCalled();
+    await expect(missingCourseFolders(drive, course)).rejects.toThrow('duplicate');
+    await expect(new TestCreationJob(course, 'LZK', input.topic).run(drive)).rejects.toThrow('duplicate');
     expect(api.createFolder).not.toHaveBeenCalled();
   });
-  it('reuses the same copy ID when retrying an interrupted copy', async () => {
+  it('does not implicitly create a missing course category', async () => {
+    const { api, drive } = fakeDrive();
+    await expect(new TestCreationJob(course, 'LZK', input.topic).run(drive)).rejects.toThrow('Set up LZKs');
+    expect(api.createFolder).not.toHaveBeenCalled();
+  });
+  it('imports only into the selected test and preserves the scanner original', async () => {
+    const { api, drive, items, parents } = fakeDrive();
+    const result = await new ImportJob(input).run(drive);
+    const scans = [...items.values()].find(item => item.name === '01_Scans')!;
+    expect(parents.get(scans.id)).toBe('test');
+    expect(parents.get(result.id)).toBe(scans.id);
+    expect(result.name).toBe('20261003_LZK-IF8a-Zahlen-Konvertieren-Dezimal-Dual.pdf');
+    expect(items.get('scan')!.name).toBe('scanner.pdf');
+    expect(parents.get('scan')).toBe('input');
+    expect(api.createFolder.mock.calls.map(call => call[1])).toEqual(['01_Scans']);
+  });
+  it('reuses the same copy ID when retrying an interrupted import', async () => {
     const { api, drive } = fakeDrive();
     const copy = api.copyScan.getMockImplementation()!;
     api.copyScan.mockImplementationOnce(async (...args) => { await copy(...args); throw new Error('Lost copy response'); });
-    const job = new PreparationJob(input);
+    const job = new ImportJob(input);
     await expect(job.run(drive)).rejects.toThrow('Lost copy response');
     const result = await job.run(drive);
     expect(api.copyScan.mock.calls[0][4]).toBe(api.copyScan.mock.calls[1][4]);
-    expect(result.scan.id).toBe(api.copyScan.mock.calls[0][4]);
+    expect(result.id).toBe(api.copyScan.mock.calls[0][4]);
   });
-  it('checks source membership before creating folders', async () => {
+  it('checks source membership before creating scan folders', async () => {
     const { api, drive, parents } = fakeDrive(); parents.set('scan', 'elsewhere');
-    await expect(new PreparationJob(input).run(drive)).rejects.toThrow('no longer');
+    await expect(new ImportJob(input).run(drive)).rejects.toThrow('no longer');
     expect(api.createFolder).not.toHaveBeenCalled();
   });
 });

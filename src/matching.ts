@@ -1,3 +1,4 @@
+import { renderTaskInputs } from './workflowInputs';
 import type { GoogleDrive } from './googleDrive';
 import type { DriveItem } from './types';
 import { parseStudents, studentLabel, matchingStudents, type Student } from './students';
@@ -35,6 +36,10 @@ export class MatchingTask {
   constructor(private drive: GoogleDrive, private refresh: () => void, private setBusy: (busy: boolean) => void) {}
   get hasIncompletePreviewExport(): boolean { return Boolean(this.previewExport && !this.previewExport.complete); }
   prefill(folder?: DriveItem): void { this.folder ??= folder; }
+  setPaths(folder?: DriveItem, csv?: DriveItem): void {
+    if (this.folder?.id === folder?.id && this.csv?.id === csv?.id) return;
+    this.reset(); this.folder = folder; this.csv = csv;
+  }
   private clearPreviewExport(): void { this.previewExport = undefined; this.previewExportOpen = false; }
   private clearPreview(): void {
     for (const preview of this.previews.values()) URL.revokeObjectURL(preview.crop);
@@ -233,7 +238,7 @@ export class MatchingTask {
     }
     return true;
   }
-  render(ready: boolean): string {
+  render(ready: boolean, automatic = false): string {
     const disable = (value: boolean) => value ? 'disabled' : '';
     const exam = this.crop ? this.exams[this.index] : undefined, student = this.selected();
     const done = this.exams.filter(exam => this.recognized(exam)).length;
@@ -242,10 +247,11 @@ export class MatchingTask {
       <div class="intro"><div><p class="eyebrow">MATCH STUDENTS</p><h1>A name for every exam.</h1><p class="lead-copy">Start with a folder of already-sliced exams and a student CSV list. <br>Read the handwritten name, choose a student, and rename the PDF.</p></div></div>
       <div role="alert" class="alert alert-danger" ${this.error ? '' : 'hidden'}>${html(this.error)}</div>
       <section class="subtask workspace-panel ${this.busy && this.busyStage === 'setup' ? 'subtask-busy' : ''}">
-        <h2 class="subtask-heading"><button id="match-setup" aria-expanded="${this.setupOpen}" aria-controls="match-setup-body" ${disable(this.busy)}><span class="step-number">1</span><span class="subtask-title">Choose exams & student list<small>${html(this.folder?.name || 'Choose a Drive folder')} · ${html(this.csv?.name || 'Choose a CSV')}</small></span><span aria-hidden="true">${this.setupOpen ? '⌃' : '⌄'}</span></button></h2>
+        <h2 class="subtask-heading"><button id="match-setup" aria-expanded="${this.setupOpen}" aria-controls="match-setup-body" ${disable(this.busy)}><span class="step-number">1</span><span class="subtask-title">${automatic ? 'Load exams & students' : 'Choose exams & student list'}<small>${html(this.folder?.name || 'Choose a Drive folder')} · ${html(this.csv?.name || 'Choose a CSV')}</small></span><span aria-hidden="true">${this.setupOpen ? '⌃' : '⌄'}</span></button></h2>
         <div id="match-setup-body" class="subtask-body" ${this.setupOpen ? '' : 'hidden'}>
-          <div class="selection-grid"><div class="selection-step"><h3>Exam folder</h3><div class="file-selection"><strong>${html(this.folder?.name || 'No folder selected')}</strong></div><div class="selection-actions"><button id="match-folder" class="btn btn-outline-primary" ${disable(!ready || this.busy)}>Choose exam folder</button></div></div>
+          ${automatic ? renderTaskInputs(this.folder, this.csv, '03_Split') : `          <div class="selection-grid"><div class="selection-step"><h3>Exam folder</h3><div class="file-selection"><strong>${html(this.folder?.name || 'No folder selected')}</strong></div><div class="selection-actions"><button id="match-folder" class="btn btn-outline-primary" ${disable(!ready || this.busy)}>Choose exam folder</button></div></div>
           <div class="selection-step"><h3>Student CSV</h3><div class="file-selection"><strong>${html(this.csv?.name || 'No CSV selected')}</strong></div><div class="selection-actions"><button id="match-csv" class="btn btn-outline-primary" ${disable(!ready || this.busy)}>Choose student CSV</button></div><p>Columns: Nr., Nachname, Vorname, E-Mail-Adresse. Semicolon or comma separated.</p></div></div>
+`}
           ${!this.drive.matchingAccess ? `<div class="matching-access"><p>To find and rename existing exams inside a folder, allow access to your Drive files. Google will ask for broader Drive permission than Slice exams uses.</p><button id="match-access" class="btn btn-outline-primary" ${disable(!ready || this.busy)}>Enable folder access</button></div>` : ''}
           <div class="panel-footer"><span>List PDFs in this folder and load the student list. Subfolders are not included.</span><button id="match-load" class="btn btn-primary" ${disable(this.busy || !this.folder || !this.csv || !this.drive.matchingAccess)}>Find exams & students</button></div>
         </div>

@@ -59,7 +59,7 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
   await page.goto('/');
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
-  await expect(page.locator('.file-selection').first()).toContainText('Drive exam.pdf');
+  await expect(page.locator('#panel-slice .file-selection').first()).toContainText('Drive exam.pdf');
   await page.getByRole('button', { name: 'Choose Drive folder' }).click();
   await page.getByRole('button', { name: 'Scan PDF', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Scan complete', { timeout: 90000 });

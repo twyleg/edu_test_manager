@@ -19,14 +19,14 @@ test('accepts PDF and folder selections after the picker has opened', async ({ p
   await expect(page.getByRole('button', { name: 'Choose PDF from Drive' })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Drive exam.pdf' }).click();
   await dialog.getByRole('button', { name: 'Select', exact: true }).click();
-  await expect(page.locator('.file-selection').first()).toContainText('Drive exam.pdf');
+  await expect(page.locator('#panel-slice .file-selection').first()).toContainText('Drive exam.pdf');
   await expect(page.getByRole('button', { name: 'Scan PDF', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Choose Drive folder' }).click();
   dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('button', { name: 'Select', exact: true })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Physics class' }).click();
   await dialog.getByRole('button', { name: 'Select', exact: true }).click();
-  await expect(page.locator('.file-selection').nth(1)).toContainText('Physics class');
+  await expect(page.locator('#panel-slice .file-selection').nth(1)).toContainText('Physics class');
   await expect(page.getByRole('button', { name: 'Choose Drive folder' })).toBeEnabled();
   expect(pickerEvents.filter(event => event.includes('Selection accepted'))).toHaveLength(2);
   expect(pickerEvents.some(event => event.includes('loaded'))).toBe(true);
@@ -43,7 +43,7 @@ test('empty selection displays an error and cancel releases the controls', async
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Choose PDF from Drive' })).toBeEnabled();
-  await expect(page.locator('.file-selection').first()).toContainText('No PDF selected');
+  await expect(page.locator('#panel-slice .file-selection').first()).toContainText('No PDF selected');
 });
 
 test('remembers the student CSV folder across tasks and reloads without changing other pickers', async ({ page }) => {

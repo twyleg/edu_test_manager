@@ -4,6 +4,14 @@ The **Slice exams** task lets you choose a scanned PDF and output folder in Goog
 
 Built with Vite, TypeScript and Bootstrap, following [playground_googledrive_filepicker](https://github.com/twyleg/playground_googledrive_filepicker). Google Identity Services handles sign-in; Google Picker selects PDFs and folders in My Drive or shared drives. PDF.js renders pages for jsQR detection, and pdf-lib copies the original pages into the output files. There is no application backend.
 
+## Shared workflow inputs
+
+Select the **Course directory** and **Student list file** in the topbar. Choose a scan PDF within **Import scans**. With remembering enabled in Privacy & storage settings, these selections are restored on the next visit. The student CSV picker also opens in the last student-list directory.
+
+Choose **Current test** to resume a test inside the course's LZKs or Klausuren folders. Use **Create a new test** in that menu to enter a topic and type; the new test is selected automatically. Slice exams lists PDFs from its `02_Korrigiert` folder and selects `03_Split` as the destination. Match students uses `03_Split` and the shared CSV. Prepare drafts offers **Preview drafts** from `04_Previews` or **Final drafts** from `03_Split`, using the same CSV; recipient review, email templates, and Gmail authorization remain available.
+
+Enable folder access to list existing course tests and PDFs. Refresh tests after adding corrected PDFs in Drive. Shared selections are locked during active operations and incomplete jobs so retry destinations stay stable.
+
 ## Run locally
 
 Use Node.js 22.13+ (or a newer supported LTS release).
@@ -40,9 +48,9 @@ For deployment, run `npm run build`, host `dist/` on HTTPS, add the production o
 
 ## Tasks and subtasks
 
-The application has five independent **Tasks**, shown as tabs. **Preparation** opens by default. They are entry points, not mandatory sequential steps:
+The application has five independent **Tasks**, shown as tabs. **Import scans** opens by default. They are entry points, not mandatory sequential steps:
 
-- **Preparation**: organize an original scanner PDF in a numbered test folder, create the standard subfolders, and copy the scan into `01_Scans`.
+- **Import scans**: copy and rename a scanner PDF into the selected test’s `01_Scans` folder.
 - **Slice exams**: split a combined scan into individual exam PDFs. This task is implemented and can be completed without matching students or preparing email drafts.
 - **Match students**: start directly with a Google Drive folder containing already-sliced exams and a student CSV list. Match exams to students using their handwritten names. Slicing need not happen in the same session or in this application.
 - **Batch send**: independently load drafts using the Gmail label `bulk-send`, select messages and send them explicitly.
@@ -58,13 +66,13 @@ Actions within a task are called **Subtasks**. Slice exams has three vertically 
 
 During downloading, scanning, preparation or upload, the active banner is muted and a floating progress island at the bottom of the viewport receives focus. It stays visible while scrolling, then returns to an inline status message when processing ends. Drive downloads first request the PDF size from Drive metadata, then show a growing bar and percentage based on received bytes—even when the download response omits Content-Length. If neither metadata nor response headers provide a usable size, an activity bar and received-byte count remain the fallback. Downloads can be cancelled with Cancel scan. Successful completion folds that subtask and opens the next; after saving to Drive, the final subtask folds with its saved-file count in the header. Completed panels can be reopened to inspect their contents. Errors and cancellation keep the relevant panel open for correction or retry. Unavailable subtasks remain folded until their inputs exist. Starting a new batch returns to the first subtask.
 
-## Preparation workflow
+## Course setup, tests and scan import
 
-1. Open **Preparation**, then **Enable folder access**. Preparation uses the same broader Drive scope as matching, so it can list existing scanner files and test folders.
-2. Choose the scanner input folder and select a PDF from its file list. **Preview scan** opens that PDF with previous/next page navigation so you can identify its contents. Only the selected PDF is downloaded for preview; closing the preview cancels pending work and releases its data. **Refresh files** reloads that list.
-3. Choose the existing **Course folder**, for example `Informatik/08/2026-2027/8a`. The subject, school-year and calendar-year hierarchy is maintained manually; Preparation creates folders within the selected Course folder.
-4. Choose **Physik** or **Informatik**, and **LZK** or **Klausur**. Check the class code derived from the Course folder name, enter the test topic, and choose the test date (defaults to today in Europe/Berlin).
-5. Review the filename preview, then click **Start preparation**. The app ensures the Course folder has `LZKs` and `Klausuren`, then creates the next numbered test folder in the selected type folder. Numbering uses the highest existing numeric folder prefix plus one, independently for each type, with at least two digits. Topic whitespace becomes hyphens, preserving umlauts.
+1. Select the **Course directory**, for example `Informatik/08/2026-2027/8a`, in the topbar. Enable folder access when requested. The app checks for `LZKs` and `Klausuren` and asks before creating any missing category folders. Cancel leaves the course unchanged. The subject, school-year and calendar-year hierarchy is maintained manually.
+2. Open **Current test** to choose an existing test, or **Create a new test**. Enter the topic and choose **LZK** or **Klausur**. The app creates the next numbered test folder and its `01_Scans`, `02_Korrigiert`, `03_Split` and `04_Previews` subfolders, then selects it. Numbering uses the highest existing numeric folder prefix plus one, independently for each type. Topic whitespace becomes hyphens, preserving umlauts.
+3. Open **Import scans** and click **Choose PDF from Drive**. The picker starts in the last scan directory when remembering is enabled; you can browse to another directory. The selected PDF’s actual parent is remembered automatically.
+4. Choose **Physik** or **Informatik**, check the class code derived from the course folder, and choose the test date (defaults to today in Europe/Berlin). Type and topic come from the current test.
+5. Review the filename and click **Import scan**. A renamed copy is saved into that test’s `01_Scans` directory, creating that subfolder if necessary. **Import another scan** resets the scan selection while retaining the current test and input directory.
 
 For example, Informatik / LZK / 8a / Zahlen Konvertieren Dezimal Dual on 2026-10-03 produces:
 
@@ -80,11 +88,13 @@ For example, Informatik / LZK / 8a / Zahlen Konvertieren Dezimal Dual on 2026-10
         └── 04_Previews/
 ```
 
-A renamed copy of the Drive file is saved to `01_Scans` after all required folders are ready. The original stays unchanged in the scanner input folder. Filename format is `YYYYMMDD_{KA|LZK}-{PH|IF}{class}-{topic}.pdf`. Preparation rejects ambiguous required folder names and existing destination filenames. If an operation fails, keep the tab open and use **Retry preparation**; the in-memory job keeps stable folder and copy IDs to resume without creating another test or duplicate scan copy. Job inputs stay locked once preparation starts. Reloading loses this job state; inspect the folders in Drive before starting again. Prepare only one test at a time per Course/type folder across tabs or devices, since Drive does not enforce unique names or reserve numbering atomically.
+The original PDF stays unchanged in the scanner input folder. Filename format is `YYYYMMDD_{KA|LZK}-{PH|IF}{class}-{topic}.pdf`. Ambiguous required folder names and existing destination filenames are rejected. If creation or import fails, keep the dialog or tab open and retry; stable folder and copy IDs allow the same job to resume. Inputs stay locked during incomplete jobs. Reloading loses retry tracking; inspect Drive before starting again. Create only one test at a time per course/type across tabs or devices, since Drive does not reserve numbering atomically.
 
-Preparation finishes after copying the scan and shows links to the test folders. **Prepare another test** clears the completed preparation form. After grading, save the combined corrected PDF to `02_Korrigiert`. When it is ready, open **Slice exams**, choose that PDF as input, and select `03_Split` as the output folder.
+After grading, save the combined corrected PDF to `02_Korrigiert`. **Slice exams** lists these PDFs and defaults to `03_Split` for output.
 
 ## Slice exams workflow
+
+With a current test selected, the input directory defaults to `02_Korrigiert` and the output to `03_Split`. Select a PDF from the visible file list. Each directory has a small **Change** button to override it; overrides remain while switching task tabs and reset when the current test changes. Refresh the current test menu to reload the PDF listing. Without a current test, the standalone Drive and local-PDF controls remain available.
 
 1. Connect Google Drive and choose the combined **PDF**. The picker opens with a PDF-wide listing across folders; use Google’s date sorting to find recent scans. My Drive root browsing and Shared drives are also available. Google controls the listing order; the app does not use the deprecated `RECENTLY_PICKED` view or keep a separate recent-files history.
 2. Choose a writable **output folder**. In Picker, single-click the folder row and click **Select**. Double-clicking opens the folder; to select that folder, return to its parent and select its row. Folder selection and downloads support shared drives subject to your Google account’s permissions.

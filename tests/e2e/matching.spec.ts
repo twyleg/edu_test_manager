@@ -44,7 +44,7 @@ test('matches a Drive folder using CSV and renames in place, recovering a lost r
   // The slicing folder is prefilled in matching, without needing to scan.
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose Drive folder', exact: true }).click();
-  await expect(page.locator('.file-selection').nth(1)).toContainText('Physics class');
+  await expect(page.locator('#panel-slice .file-selection').nth(1)).toContainText('Physics class');
   await page.getByRole('tab', { name: 'Match students', exact: true }).click();
   await expect(page.locator('#match-setup-body')).toContainText('Physics class');
   await page.getByRole('button', { name: 'Enable folder access', exact: true }).click();

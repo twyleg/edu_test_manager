@@ -14,7 +14,7 @@ interface Callbacks {
   onConnection: (connected: boolean) => void;
   onError: (message: string) => void;
   onPick: (kind: PickerKind, item: DriveItem, items?: DriveItem[]) => void;
-  onPickerClosed: () => void;
+  onPickerClosed: (selected?: boolean) => void;
 }
 
 export class GoogleDrive {
@@ -22,6 +22,7 @@ export class GoogleDrive {
   private client: TokenClient | null = null;
   private pendingPicker?: PickerKind;
   private studentFolderSelection = 0;
+  private pendingPickerParent?: string;
   private callbacks?: Callbacks;
 
   get connected(): boolean { return Boolean(this.token && this.token.expiresAt > Date.now()); }
@@ -85,7 +86,8 @@ export class GoogleDrive {
         if (this.pendingPicker) {
           const kind = this.pendingPicker;
           this.pendingPicker = undefined;
-          this.openPicker(kind);
+          this.openPicker(kind, this.pendingPickerParent);
+          this.pendingPickerParent = undefined;
         }
       },
       error_callback: () => {
@@ -141,10 +143,10 @@ export class GoogleDrive {
     } catch { /* Remembering a location is optional; never interrupt CSV selection. */ }
   }
 
-  openPicker(kind: PickerKind): void {
+  openPicker(kind: PickerKind, parentId?: string): void {
     const configError = getGoogleConfigError();
     if (configError) throw new Error(configError);
-    if (!this.connected) { this.pendingPicker = kind; this.connect(); return; }
+    if (!this.connected) { this.pendingPicker = kind; this.pendingPickerParent = parentId; this.connect(); return; }
     const picker = window.google.picker;
     const mimeTypes = kind === 'attachment' ? '' : kind === 'folder' ? folderMimeType : kind === 'pdf' ? pdfMimeType : 'text/csv,application/csv,text/plain,application/vnd.ms-excel,application/octet-stream';
     // Picker defaults to /favicon.ico for its parent-side RPC relay. Serve a
@@ -164,7 +166,8 @@ export class GoogleDrive {
       .setRelayUrl(relayUrl);
     if (mimeTypes) builder.setSelectableMimeTypes(mimeTypes);
     if (kind === 'attachment') builder.enableFeature(picker.Feature.MULTISELECT_ENABLED);
-    if (kind === 'pdf') {
+    if (parentId) builder.addView(makeView().setParent(parentId).setLabel('Selected workflow folder'));
+    if (kind === 'pdf' && !parentId) {
       // No parent restriction: expose Google's PDF listing across folders.
       // RECENTLY_PICKED is deprecated; listing order is controlled by Picker.
       builder.addView(new picker.DocsView(picker.ViewId.PDFS)
@@ -189,7 +192,7 @@ export class GoogleDrive {
           }
           if (action === picker.Action.CANCEL) this.callbacks?.onPickerClosed();
           if (action !== picker.Action.PICKED) return;
-          this.callbacks?.onPickerClosed();
+          this.callbacks?.onPickerClosed(true);
           const doc = Array.isArray(documents) ? documents[0] as PickerDocument | undefined : undefined;
           if (!doc || typeof doc !== 'object') {
             this.callbacks?.onError('Google Picker returned no selected item. Open the picker again, click the file or folder row, then click Select.');
@@ -366,15 +369,15 @@ export class GoogleDrive {
     }
   }
 
-  async getParentFolder(item: DriveItem): Promise<DriveItem> {
+  async getParentFolder(item: DriveItem, requireFolder = true): Promise<DriveItem> {
     const response = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}?fields=parents,mimeType,trashed&supportsAllDrives=true`);
     const info = await response.json() as { parents?: string[]; mimeType?: string; trashed?: boolean };
-    if (info.trashed || info.mimeType !== folderMimeType || info.parents?.length !== 1) {
-      throw new Error('Choose an exam folder inside a Test folder so 04_Previews can be created beside it.');
+    if (info.trashed || (requireFolder && info.mimeType !== folderMimeType) || info.parents?.length !== 1) {
+      throw new Error(requireFolder ? 'Choose an exam folder inside a Test folder so 04_Previews can be created beside it.' : 'The selected PDF has no accessible parent folder. Choose another PDF.');
     }
     const parentResponse = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(info.parents[0])}?fields=id,name,mimeType,trashed&supportsAllDrives=true`);
     const parent = await parentResponse.json() as DriveItem & { trashed?: boolean };
-    if (parent.trashed || parent.mimeType !== folderMimeType) throw new Error('The Test folder is no longer available. Choose the exam folder again.');
+    if (parent.trashed || parent.mimeType !== folderMimeType) throw new Error('The parent folder is no longer available. Choose the file or folder again.');
     return parent;
   }
 

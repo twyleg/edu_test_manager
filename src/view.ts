@@ -8,6 +8,9 @@ export interface AppState {
   connected: boolean;
   busy: '' | 'picker' | 'scan' | 'split' | 'upload' | 'folder' | 'match' | 'drafts' | 'send' | 'preparation';
   source?: DriveItem;
+  correctedPdfs?: DriveItem[];
+  inputFolder?: DriveItem;
+  workflowTest?: boolean;
   localFile?: File;
   folder?: DriveItem;
   pages: PageScan[];
@@ -34,7 +37,7 @@ const icon = (kind: 'file' | 'folder' | 'cut' | 'zoom') => {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind]}</svg>`;
 };
 
-export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '', sendPanel = '', preparationPanel = ''): string {
+export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '', sendPanel = '', preparationPanel = '', workflowPanel = '', workflowInputs = ''): string {
   const { busy, pages, files } = state;
   const processing = busy === 'scan' || busy === 'split' || busy === 'upload';
   const locked = Boolean(busy || state.uploadStarted);
@@ -60,13 +63,15 @@ export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '',
   return `
     <header class="topbar"><div class="shell topbar-inner">
       <a class="brand" href="./"><span class="brand-mark">${icon('cut')}</span> EDU <span class="brand-light">Test Manager</span></a>
+      ${workflowInputs}
       <div class="connection"><span class="connection-label"><i class="status-dot ${state.connected ? 'online' : ''}"></i>${state.connected ? 'Drive connected' : 'Drive not connected'}</span>
         <button id="connect" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy) || googleDisabled)}>${state.connected ? 'Disconnect' : 'Connect Google Drive'}</button>
       </div>
     </div></header>
     <main class="shell">
+      ${workflowPanel}
       <nav class="task-tabs" role="tablist" aria-label="Tasks">
-        ${(['preparation', 'slice', 'match', 'drafts', 'send'] as const).map((task, index) => `<button id="task-${task}" role="tab" aria-selected="${state.task === task}" aria-controls="panel-${task}" tabindex="${state.task === task ? 0 : -1}" data-task="${task}" ${disabled(Boolean(busy))}>${['Preparation', 'Slice exams', 'Match students', 'Prepare drafts', 'Batch send'][index]}</button>`).join('')}
+        ${(['preparation', 'slice', 'match', 'drafts', 'send'] as const).map((task, index) => `<button id="task-${task}" role="tab" aria-selected="${state.task === task}" aria-controls="panel-${task}" tabindex="${state.task === task ? 0 : -1}" data-task="${task}" ${disabled(Boolean(busy))}>${['Import scans', 'Slice exams', 'Match students', 'Prepare drafts', 'Batch send'][index]}</button>`).join('')}
       </nav>
       <div id="error" role="alert" ${state.error ? '' : 'hidden'} class="alert alert-danger">${escapeHtml(state.error)}</div>
       ${state.task === 'match' ? matchingPanel : ''}
@@ -78,10 +83,17 @@ export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '',
       ${pages.length ? `<div class="batch-actions"><button id="reset" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy))}>Start a new batch</button></div>` : ''}
       ${subtask('setup', 1, 'Choose files & scan', pages.length ? `${pages.length} pages scanned · ${selected}` : selected || 'Choose an exam PDF and its output folder', true, busy === 'scan')}
       <div aria-label="PDF selection">
-        <div class="selection-grid">
+        ${state.workflowTest ? `<div class="slice-folders">
+          <div class="slice-source">
+            <div class="slice-folder-heading"><div><span class="form-label">Input directory</span><strong>${escapeHtml(state.inputFolder?.name || '02_Korrigiert not found')}</strong></div><button id="choose-slice-input" class="btn btn-sm btn-outline-secondary" aria-label="Change input folder" ${disabled(locked || googleDisabled)}>Change</button></div>
+            <label for="slice-file" class="visually-hidden">Exam PDF</label><select id="slice-file" class="form-select slice-file-list" size="5" ${disabled(locked || pages.length > 0 || !state.correctedPdfs?.length)}><option value="" ${!state.source ? 'selected' : ''}>${state.correctedPdfs?.length ? 'Choose a corrected PDF' : 'No PDFs available in this folder'}</option>${(state.correctedPdfs || []).map(file => `<option value="${escapeHtml(file.id)}" ${state.source?.id === file.id ? 'selected' : ''}>${escapeHtml(file.name)}</option>`).join('')}</select>
+          </div>
+          <div class="slice-destination"><div class="slice-folder-heading"><div><span class="form-label">Output directory</span><strong>${escapeHtml(state.folder?.name || '03_Split not found')}</strong></div><button id="choose-folder" class="btn btn-sm btn-outline-secondary" aria-label="Change output folder" ${disabled(locked || googleDisabled)}>Change</button></div></div>
+        </div>` : `        <div class="selection-grid">
           <div class="selection-step"><div class="step-heading"><h3>Choose the exam scan</h3></div>
             <p>The single PDF containing all students’ tests.</p>
             <div class="file-selection ${selected ? 'has-selection' : ''}"><span class="selection-icon">${icon('file')}</span><div><strong>${selected ? escapeHtml(selected) : 'No PDF selected'}</strong><span>${selected ? state.localFile ? 'Local PDF · processed in your browser' : 'PDF from Google Drive' : 'Select a PDF from Google Drive'}</span></div></div>
+            ${state.correctedPdfs ? `<label for="slice-file" class="form-label">PDFs in 02_Korrigiert</label><select id="slice-file" class="form-select" ${disabled(locked || pages.length > 0)}><option value="">Choose a corrected PDF</option>${state.correctedPdfs.map(file => `<option value="${escapeHtml(file.id)}" ${state.source?.id === file.id ? 'selected' : ''}>${escapeHtml(file.name)}</option>`).join('')}</select>` : ''}
             <div class="selection-actions"><button id="choose-pdf" class="btn btn-outline-primary" ${disabled(locked || googleDisabled)}>Choose PDF from Drive</button>
               <label class="local-label ${locked ? 'disabled' : ''}">or use a local PDF<input id="local-pdf" type="file" accept="application/pdf,.pdf" ${disabled(locked)} /></label></div>
           </div>
@@ -92,6 +104,7 @@ export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '',
             <p class="folder-hint">Click the Name column in the picker to sort alphabetically. Single-click the folder’s row, then click Select. New folders are created inside the selected folder, or in My Drive if none is selected.</p>
           </div>
         </div>
+`}
         <div class="px-4 py-3 border-top d-flex flex-wrap gap-3 align-items-center">
           <label for="scan-threads" class="fw-semibold">Scan threads</label>
           <input id="scan-threads" class="form-control" style="width:5rem" type="number" min="1" max="8" step="1" value="${state.scanThreads}" ${disabled(locked)} aria-describedby="scan-hint" />

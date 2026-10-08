@@ -23,7 +23,7 @@ test('floating progress follows a streamed Drive download and then scanning', as
   await page.goto('/');
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
-  await expect(page.locator('.file-selection').first()).toContainText('Drive exam.pdf');
+  await expect(page.locator('#panel-slice .file-selection').first()).toContainText('Drive exam.pdf');
   await page.getByRole('button', { name: 'Scan PDF', exact: true }).click();
   const island = page.locator('.progress-island');
   await expect(island).toBeFocused();
@@ -70,7 +70,7 @@ test('unknown download size shows activity and received bytes, and can be cancel
   await page.goto('/');
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
-  await expect(page.locator('.file-selection').first()).toContainText('Drive exam.pdf');
+  await expect(page.locator('#panel-slice .file-selection').first()).toContainText('Drive exam.pdf');
   await page.getByRole('button', { name: 'Scan PDF', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('2.0 KB received');
   await expect(page.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow');

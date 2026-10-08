@@ -27,7 +27,7 @@ test('creates a folder in My Drive and selects it as the output destination', as
   await dialog.getByLabel('Folder name').fill(' Physics exams ');
   await dialog.getByRole('button', { name: 'Create folder', exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('.file-selection').nth(1)).toContainText('Physics exams');
+  await expect(page.locator('#panel-slice .file-selection').nth(1)).toContainText('Physics exams');
   expect(writes).toBe(1);
 });
 
@@ -53,7 +53,7 @@ test('creates inside the selected parent and recovers a lost response without du
   await page.goto('/');
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose Drive folder' }).click();
-  await expect(page.locator('.file-selection').nth(1)).toContainText('Physics class');
+  await expect(page.locator('#panel-slice .file-selection').nth(1)).toContainText('Physics class');
   await page.getByRole('button', { name: 'New folder', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('Inside Physics class');
@@ -62,9 +62,9 @@ test('creates inside the selected parent and recovers a lost response without du
   await expect(dialog.getByRole('alert')).toContainText('Check your connection and retry');
   await dialog.getByRole('button', { name: 'Create folder', exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('.file-selection').nth(1)).toContainText('September');
+  await expect(page.locator('#panel-slice .file-selection').nth(1)).toContainText('September');
   expect(writes).toBe(1);
   await page.getByRole('button', { name: 'New folder', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(page.locator('.file-selection').nth(1)).toContainText('September');
+  await expect(page.locator('#panel-slice .file-selection').nth(1)).toContainText('September');
 });

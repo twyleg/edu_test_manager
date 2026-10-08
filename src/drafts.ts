@@ -1,3 +1,4 @@
+import { renderTaskInputs } from './workflowInputs';
 import { GoogleDrive, GoogleHttpError } from './googleDrive';
 import { Gmail } from './gmail';
 import type { DriveItem } from './types';
@@ -9,6 +10,21 @@ const html = (value: string) => value.replace(/[&<>"']/g, ch => ({ '&': '&amp;',
 export class DraftTask {
   folder?: DriveItem;
   csv?: DriveItem;
+  private workflowFolders?: { split?: DriveItem; previews?: DriveItem };
+  private mode: 'preview' | 'final' = 'final';
+  setPaths(folders: { split?: DriveItem; previews?: DriveItem }, csv?: DriveItem): void {
+    const folder = this.mode === 'preview' ? folders.previews : folders.split;
+    this.workflowFolders = folders;
+    if (this.folder?.id === folder?.id && this.csv?.id === csv?.id) return;
+    if (this.hasIncompleteBatch) return;
+    this.reset(); this.folder = folder; this.csv = csv;
+  }
+  changeMode(mode: string): void {
+    if (this.started || this.busy || !['preview', 'final'].includes(mode)) return;
+    this.mode = mode as 'preview' | 'final';
+    if (this.workflowFolders) this.setPaths(this.workflowFolders, this.csv);
+    this.refresh();
+  }
   private picker?: 'folder' | 'csv' | 'attachment';
   private students: Student[] = [];
   private rows: DraftRow[] = [];
@@ -213,13 +229,13 @@ export class DraftTask {
       case 'draft-toggle-compose': this.expanded.compose = !this.expanded.compose; this.refresh(); break;
       case 'draft-toggle-review': this.expanded.review = !this.expanded.review; this.refresh(); break;
       case 'draft-new':
-        if (!this.hasIncompleteBatch || window.confirm('Some drafts may already exist in Gmail. Starting a new batch discards retry tracking. Check Gmail before including these files again. Start a new batch?')) { this.reset(); this.refresh(); }
+        if (!this.hasIncompleteBatch || window.confirm('Some drafts may already exist in Gmail. Starting a new batch discards retry tracking. Check Gmail before including these files again. Start a new batch?')) { const folder = this.folder; const csv = this.csv; this.reset(); this.prefill(folder, csv); this.refresh(); }
         break;
       default: return false;
     }
     return true;
   }
-  render(ready: boolean): string {
+  render(ready: boolean, automatic = false): string {
     const disabled = (value: boolean) => value ? 'disabled' : '';
     const locked = this.busy || this.started;
     const selected = this.rows.filter(row => row.included);
@@ -229,9 +245,13 @@ export class DraftTask {
       <div class="intro"><div><p class="eyebrow">PREPARE DRAFTS</p><h1>Ready for your final check.</h1><p class="lead-copy">Create a Gmail draft for each student with their exam attached. Review and send later in Gmail.</p></div></div>
       <div role="alert" class="alert alert-danger" ${this.error ? '' : 'hidden'}>${html(this.error)}</div>
       ${this.started ? `<div class="batch-actions"><button id="draft-new" class="btn btn-sm btn-outline-secondary" ${disabled(this.busy)}>Start a new draft batch</button></div>` : ''}
-      ${section('setup', 1, 'Choose exams & student list', `${this.folder?.name || 'Choose a folder'} · ${this.csv?.name || 'Choose a CSV'}`, true)}
-        <div class="selection-grid"><div class="selection-step"><h3>Renamed exam folder</h3><div class="file-selection"><strong>${html(this.folder?.name || 'No folder selected')}</strong></div><div class="selection-actions"><button id="draft-folder" class="btn btn-outline-primary" ${disabled(locked || !ready)}>Choose exam folder</button></div></div>
+      ${section('setup', 1, automatic ? 'Choose draft type' : 'Choose exams & student list', `${this.folder?.name || 'Choose a folder'} · ${this.csv?.name || 'Choose a CSV'}`, true)}
+        <fieldset id="draft-mode" class="draft-mode-switch" ${disabled(locked)}><legend>What should students receive?</legend><div class="draft-mode-options">
+          ${(['preview', 'final'] as const).map(mode => `<label class="draft-mode-option"><input id="draft-mode-${mode}" type="radio" name="draft-mode" value="${mode}" ${this.mode === mode ? 'checked' : ''} /><span><strong>${mode === 'preview' ? 'Preview drafts' : 'Final drafts'}</strong><small>${mode === 'preview' ? 'Front-page previews for students to check' : 'Complete corrected exams'}</small></span></label>`).join('')}
+        </div></fieldset>
+        ${automatic ? renderTaskInputs(this.folder, this.csv, this.mode === 'preview' ? '04_Previews' : '03_Split') : `        <div class="selection-grid"><div class="selection-step"><h3>Renamed exam folder</h3><div class="file-selection"><strong>${html(this.folder?.name || 'No folder selected')}</strong></div><div class="selection-actions"><button id="draft-folder" class="btn btn-outline-primary" ${disabled(locked || !ready)}>Choose exam folder</button></div></div>
         <div class="selection-step"><h3>Student CSV</h3><div class="file-selection"><strong>${html(this.csv?.name || 'No CSV selected')}</strong></div><div class="selection-actions"><button id="draft-csv" class="btn btn-outline-primary" ${disabled(locked || !ready)}>Choose student CSV</button></div></div></div>
+`}
         ${!this.google.draftsAccess || !this.google.matchingAccess ? `<div class="matching-access"><p>Allow Gmail draft creation and access to the exam files. This task creates drafts only.</p><button id="draft-access" class="btn btn-outline-primary" ${disabled(this.busy || !ready)}>Enable Gmail drafts</button></div>` : ''}
         <div class="panel-footer"><span>Matches files by their exact NR_NACHNAME_VORNAME.pdf filename.</span><button id="draft-load" class="btn btn-primary" ${disabled(locked || !this.folder || !this.csv || !this.google.draftsAccess || !this.google.matchingAccess)}>Load recipients & exams</button></div>
       </div></section>
