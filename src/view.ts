@@ -2,11 +2,11 @@ import { getGoogleConfigError, hasGoogleConfig } from './config';
 import type { DriveItem, ExamFile, PageScan } from './types';
 
 export interface AppState {
-  task: 'slice' | 'match' | 'drafts' | 'send';
+  task: 'preparation' | 'slice' | 'match' | 'drafts' | 'send';
   expanded: Record<'setup' | 'review' | 'save', boolean>;
   ready: boolean;
   connected: boolean;
-  busy: '' | 'picker' | 'scan' | 'split' | 'upload' | 'folder' | 'match' | 'drafts' | 'send';
+  busy: '' | 'picker' | 'scan' | 'split' | 'upload' | 'folder' | 'match' | 'drafts' | 'send' | 'preparation';
   source?: DriveItem;
   localFile?: File;
   folder?: DriveItem;
@@ -34,7 +34,7 @@ const icon = (kind: 'file' | 'folder' | 'cut' | 'zoom') => {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind]}</svg>`;
 };
 
-export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '', sendPanel = ''): string {
+export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '', sendPanel = '', preparationPanel = ''): string {
   const { busy, pages, files } = state;
   const processing = busy === 'scan' || busy === 'split' || busy === 'upload';
   const locked = Boolean(busy || state.uploadStarted);
@@ -66,12 +66,13 @@ export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '',
     </div></header>
     <main class="shell">
       <nav class="task-tabs" role="tablist" aria-label="Tasks">
-        ${(['slice', 'match', 'drafts', 'send'] as const).map((task, index) => `<button id="task-${task}" role="tab" aria-selected="${state.task === task}" aria-controls="panel-${task}" tabindex="${state.task === task ? 0 : -1}" data-task="${task}" ${disabled(Boolean(busy))}>${['Slice exams', 'Match students', 'Prepare drafts', 'Batch send'][index]}</button>`).join('')}
+        ${(['preparation', 'slice', 'match', 'drafts', 'send'] as const).map((task, index) => `<button id="task-${task}" role="tab" aria-selected="${state.task === task}" aria-controls="panel-${task}" tabindex="${state.task === task ? 0 : -1}" data-task="${task}" ${disabled(Boolean(busy))}>${['Preparation', 'Slice exams', 'Match students', 'Prepare drafts', 'Batch send'][index]}</button>`).join('')}
       </nav>
       <div id="error" role="alert" ${state.error ? '' : 'hidden'} class="alert alert-danger">${escapeHtml(state.error)}</div>
       ${state.task === 'match' ? matchingPanel : ''}
       ${state.task === 'drafts' ? draftsPanel : ''}
       ${state.task === 'send' ? sendPanel : ''}
+      ${state.task === 'preparation' ? preparationPanel : ''}
       <div id="panel-slice" role="tabpanel" aria-labelledby="task-slice" ${state.task === 'slice' ? '' : 'hidden'}>
       ${!hasGoogleConfig() ? `<aside class="setup-note" role="alert"><strong>Check your Google Drive configuration.</strong> ${escapeHtml(getGoogleConfigError()!)} See the README for setup. You can try slicing a local PDF below.</aside>` : ''}
       ${pages.length ? `<div class="batch-actions"><button id="reset" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy))}>Start a new batch</button></div>` : ''}

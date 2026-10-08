@@ -41,7 +41,8 @@ test('matches a Drive folder using CSV and renames in place, recovering a lost r
     throw new Error(`Unexpected URL: ${url.pathname}`);
   });
   await page.goto('/');
-  // Folder chosen in Task 1 is prefilled in Task 2, without needing to scan.
+  // The slicing folder is prefilled in matching, without needing to scan.
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose Drive folder', exact: true }).click();
   await expect(page.locator('.file-selection').nth(1)).toContainText('Physics class');
   await page.getByRole('tab', { name: 'Match students', exact: true }).click();
@@ -53,6 +54,7 @@ test('matches a Drive folder using CSV and renames in place, recovering a lost r
   await expect(page.locator('#match-files')).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#match-review')).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#match-review')).toBeDisabled();
+  await expect(page.locator('#match-previews')).toBeDisabled();
   await page.getByRole('button', { name: 'Find exams & students', exact: true }).click();
   await expect(page.locator('#match-files')).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('[data-match-file]:checked')).toHaveCount(3);
@@ -93,6 +95,7 @@ test('matches a Drive folder using CSV and renames in place, recovering a lost r
   await expect(page.locator('#student-search')).toHaveValue('2 · Schmidt, Lukas — lukas@example.org');
   await page.locator('#student-search').press('Enter');
   await expect(page.getByRole('status')).toContainText('All 2 selected exam filenames now match students');
+  await expect(page.locator('#match-previews')).toHaveAttribute('aria-expanded', 'true');
   await expect(page.locator('#match-review')).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#student-search')).not.toBeVisible();
   await expect(page.locator('#match-progress')).toBeFocused();

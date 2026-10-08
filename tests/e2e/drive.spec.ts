@@ -57,6 +57,7 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
     throw new Error(`Unexpected Drive request: ${request.method()} ${url}`);
   });
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
   await expect(page.locator('.file-selection').first()).toContainText('Drive exam.pdf');
   await page.getByRole('button', { name: 'Choose Drive folder' }).click();

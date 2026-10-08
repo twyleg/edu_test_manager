@@ -28,9 +28,11 @@ export async function mockGoogleUi(page: Page, manualSelection = false, attachme
         const attachment = this.title.includes('shared attachment');
         const folder = this.title.includes('folder');
         const csv = this.title.includes('CSV');
+        const selectedFolder = folder && window.__mockFolderSelections?.shift();
         const item = { id: attachment ? 'shared-attachment' : folder ? 'destination-folder' : csv ? 'students-csv' : 'source-pdf',
           name: attachment ? 'Shared guide' : folder ? 'Physics class' : csv ? 'students.csv' : 'Drive exam.pdf',
           mimeType: attachment ? ${JSON.stringify(attachmentMime)} : folder ? 'application/vnd.google-apps.folder' : csv ? 'text/csv' : 'application/pdf' };
+        if (selectedFolder) Object.assign(item, selectedFolder);
         const items = attachment ? Array.from({ length: ${attachmentCount} }, (_, index) => ({ ...item, id: index ? item.id + '-' + index : item.id, name: index ? item.name + ' ' + index : item.name })) : [item];
         if (attachment && this.feature !== 'multi') throw new Error('Attachment picker must allow multiple selections.');
         if (!attachment && !this.selectableMimeTypes.split(',').includes(item.mimeType)) throw new Error('Picker must explicitly allow the selected MIME type.');

@@ -124,7 +124,7 @@ export async function splitPdf(bytes: Uint8Array, name: string, pages: PageScan[
   }
 }
 
-export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, canvas: HTMLCanvasElement, signal: AbortSignal, rotation = 0): Promise<void> {
+export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, canvas: HTMLCanvasElement, signal: AbortSignal, rotation = 0): Promise<number> {
   signal.throwIfAborted();
   const loading = getDocument({ data: bytes.slice() });
   const abort = () => { void loading.destroy(); };
@@ -139,10 +139,47 @@ export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, c
     canvas.width = Math.ceil(viewport.width);
     canvas.height = Math.ceil(viewport.height);
     await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport }).promise;
+    return pdf.numPages;
   } finally {
     signal.removeEventListener('abort', abort);
     await loading.destroy();
     if (signal.aborted) canvas.width = canvas.height = 0;
+  }
+}
+
+/** A single-page PDF containing only the visible top 20% of the first page. */
+export async function createExamPreviewPdf(bytes: Uint8Array, signal: AbortSignal): Promise<Blob> {
+  signal.throwIfAborted();
+  const loading = getDocument({ data: bytes.slice() });
+  const abort = () => { void loading.destroy(); };
+  loading.onPassword = abort;
+  signal.addEventListener('abort', abort, { once: true });
+  const canvas = document.createElement('canvas');
+  try {
+    const source = await loading.promise;
+    signal.throwIfAborted();
+    const page = await source.getPage(1);
+    // PDF.js applies the page's rotation and crop box, so "top" matches the displayed exam.
+    const original = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: 2400 / Math.max(original.width, original.height) });
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.max(1, Math.floor(viewport.height * .2));
+    await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport }).promise;
+    signal.throwIfAborted();
+    const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Could not render the exam preview.')), 'image/png'));
+    const output = await PDFDocument.create();
+    const image = await output.embedPng(await png.arrayBuffer());
+    signal.throwIfAborted();
+    const preview = output.addPage([original.width, original.height * .2]);
+    // Embed just the rendered strip, leaving the remaining exam content out of the preview file.
+    preview.drawImage(image, { x: 0, y: 0, width: preview.getWidth(), height: preview.getHeight() });
+    const saved = await output.save();
+    signal.throwIfAborted();
+    return new Blob([saved as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
+  } finally {
+    signal.removeEventListener('abort', abort);
+    await loading.destroy();
+    canvas.width = canvas.height = 0;
   }
 }
 

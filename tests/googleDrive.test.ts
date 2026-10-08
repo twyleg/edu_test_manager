@@ -125,3 +125,62 @@ describe('matching Drive operations', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('scan copies', () => {
+  const scan = { id: 'scan', name: 'original.pdf', mimeType: 'application/pdf' };
+  it('copies into the destination with a new stable ID and name without modifying the source', async () => {
+    const result = { id: 'copy-id', name: 'renamed.pdf', mimeType: scan.mimeType };
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({}, 404))
+      .mockResolvedValueOnce(json({ mimeType: scan.mimeType, parents: ['input'] }))
+      .mockResolvedValueOnce(json({ files: [] })).mockResolvedValueOnce(json(result));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await authorizedDrive().copyScan(scan, 'input', 'scans', 'renamed.pdf', 'copy-id')).toEqual(result);
+    const [url, request] = fetchMock.mock.calls[3];
+    expect(new URL(url).pathname).toBe('/drive/v3/files/scan/copy');
+    expect(request.method).toBe('POST');
+    expect(JSON.parse(request.body)).toEqual({ id: 'copy-id', name: 'renamed.pdf', parents: ['scans'] });
+    expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'POST')).toBe(true);
+  });
+  it('recognizes a completed copy after a lost response', async () => {
+    const copied = { id: 'copy-id', name: 'renamed.pdf', mimeType: scan.mimeType, parents: ['scans'] };
+    const fetchMock = vi.fn().mockResolvedValue(json(copied));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await authorizedDrive().copyScan(scan, 'input', 'scans', 'renamed.pdf', 'copy-id')).toEqual(copied);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('rejects a scan moved elsewhere', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({}, 404))
+      .mockResolvedValueOnce(json({ mimeType: scan.mimeType, parents: ['other'] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(authorizedDrive().copyScan(scan, 'input', 'scans', 'renamed.pdf', 'copy-id')).rejects.toThrow('no longer');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+  it('rejects a duplicate destination filename', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({}, 404))
+      .mockResolvedValueOnce(json({ mimeType: scan.mimeType, parents: ['input'] }))
+      .mockResolvedValueOnce(json({ files: [{ id: 'other', name: 'renamed.pdf' }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(authorizedDrive().copyScan(scan, 'input', 'scans', 'renamed.pdf', 'copy-id')).rejects.toThrow('already exists');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+  it('does not silently accept a changed copy on retry', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ id: 'copy-id', name: 'renamed.pdf', mimeType: scan.mimeType, parents: ['elsewhere'] })));
+    await expect(authorizedDrive().copyScan(scan, 'input', 'scans', 'renamed.pdf', 'copy-id')).rejects.toThrow('changed or moved');
+  });
+});
+
+describe('preview destination parent folder', () => {
+  const folder = { id: 'split', name: '03_Split', mimeType: 'application/vnd.google-apps.folder' };
+  it('reads the Test folder from the actual Drive parent, independent of folder names', async () => {
+    const parent = { id: 'test', name: '01_Test', mimeType: folder.mimeType };
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({ mimeType: folder.mimeType, parents: ['test'] }))
+      .mockResolvedValueOnce(json(parent));
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await authorizedDrive().getParentFolder(folder)).toEqual(parent);
+    expect(new URL(fetchMock.mock.calls[1][0]).pathname).toBe('/drive/v3/files/test');
+  });
+  it('rejects an exam folder without a parent Test folder', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ mimeType: folder.mimeType, parents: [] })));
+    await expect(authorizedDrive().getParentFolder(folder)).rejects.toThrow('inside a Test folder');
+  });
+});

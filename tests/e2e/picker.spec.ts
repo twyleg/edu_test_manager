@@ -7,6 +7,7 @@ test('accepts PDF and folder selections after the picker has opened', async ({ p
   const pickerEvents: string[] = [];
   page.on('console', message => { if (message.text().startsWith('[Drive Picker]')) pickerEvents.push(message.text()); });
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
   const relayUrl = await page.evaluate(() => (window as unknown as { __mockPickerRelayUrl: string }).__mockPickerRelayUrl);
   expect(relayUrl).toBe(new URL('/google-picker-relay.html', page.url()).href);
@@ -34,6 +35,7 @@ test('accepts PDF and folder selections after the picker has opened', async ({ p
 
 test('empty selection displays an error and cancel releases the controls', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Simulate empty selection' }).click();
   await expect(page.getByRole('alert')).toContainText('Google Picker returned no selected item');
@@ -48,6 +50,7 @@ test('remembers the student CSV folder across tasks and reloads without changing
   await mockGoogleUi(page, true);
   const parents = () => page.evaluate(() => (window as unknown as { __mockPickerParents: (string | null)[] }).__mockPickerParents);
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('tab', { name: 'Match students', exact: true }).click();
   await page.locator('#match-csv').click();
   expect((await parents())[0]).toBe('root');

@@ -2,6 +2,7 @@ import type { GoogleDrive } from './googleDrive';
 import type { DriveItem } from './types';
 import { parseStudents, studentLabel, matchingStudents, type Student } from './students';
 import { openPagePreview } from './pagePreview';
+import { ExamPreviewExport, examPreviewFilename } from './examPreviews';
 
 const html = (value: string) => value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
 export class MatchingTask {
@@ -14,7 +15,9 @@ export class MatchingTask {
   private filesOpen = false;
   private reviewOpen = false;
   private completed = false;
-  private busyStage: 'setup' | 'files' | 'review' = 'setup';
+  private busyStage: 'setup' | 'files' | 'review' | 'previews' = 'setup';
+  private previewExport?: ExamPreviewExport;
+  private previewExportOpen = false;
   private index = 0;
   private previews = new Map<string, { bytes: Uint8Array; crop: string }>();
   private crop?: string;
@@ -30,12 +33,15 @@ export class MatchingTask {
   private picker?: 'folder' | 'csv';
 
   constructor(private drive: GoogleDrive, private refresh: () => void, private setBusy: (busy: boolean) => void) {}
+  get hasIncompletePreviewExport(): boolean { return Boolean(this.previewExport && !this.previewExport.complete); }
   prefill(folder?: DriveItem): void { this.folder ??= folder; }
+  private clearPreviewExport(): void { this.previewExport = undefined; this.previewExportOpen = false; }
   private clearPreview(): void {
     for (const preview of this.previews.values()) URL.revokeObjectURL(preview.crop);
     this.previews.clear(); this.crop = undefined; this.bytes = undefined;
   }
   private clearSelection(): void {
+    this.clearPreviewExport();
     this.available = []; this.included.clear(); this.filesOpen = this.reviewOpen = this.completed = false;
   }
   reset(): void { this.clearSelection(); this.clearPreview(); this.folder = this.csv = undefined; this.students = []; this.exams = []; this.query = this.error = this.message = ''; this.setupOpen = true; }
@@ -47,7 +53,7 @@ export class MatchingTask {
   }
   private selected(): Student | undefined { return this.students.find(student => studentLabel(student) === this.query); }
   private recognized(exam: DriveItem): boolean { return this.students.some(student => student.filename === exam.name); }
-  private begin(message: string, saving = false, stage: 'setup' | 'files' | 'review' = 'setup'): void {
+  private begin(message: string, saving = false, stage: 'setup' | 'files' | 'review' | 'previews' = 'setup'): void {
     this.busyStage = stage;
     this.busy = true; this.saving = saving; this.error = ''; this.message = message; this.progress = null;
     this.controller = new AbortController(); this.setBusy(true); this.refresh();
@@ -88,7 +94,7 @@ export class MatchingTask {
   }
   async preload(): Promise<void> {
     if (this.busy || !this.included.size || !this.drive.matchingAccess) return;
-    this.clearPreview(); this.completed = false; this.reviewOpen = false;
+    this.clearPreview(); this.clearPreviewExport(); this.completed = false; this.reviewOpen = false;
     this.exams = this.available.filter(file => this.included.has(file.id));
     this.begin('Preloading selected exams…', false, 'files');
     try {
@@ -134,6 +140,7 @@ export class MatchingTask {
     this.begin(`Renaming to ${student.filename}…`, true, 'review');
     try {
       await this.drive.renameExam(exam, this.folder.id, student.filename);
+      if (exam.name !== student.filename) this.clearPreviewExport();
       exam.name = student.filename;
       const next = this.exams.findIndex((candidate, i) => i > this.index && !this.recognized(candidate));
       const remaining = next >= 0 ? next : this.exams.findIndex(candidate => !this.recognized(candidate));
@@ -144,8 +151,28 @@ export class MatchingTask {
     finally { this.end(); }
   }
   private finishMatching(): void {
-    this.completed = true; this.reviewOpen = false;
-    this.message = `All ${this.exams.length} selected exam filenames now match students. Matching complete. Reopen the matching panel to review them.`;
+    this.completed = true; this.reviewOpen = false; this.previewExportOpen = !this.previewExport?.complete;
+    this.message = `All ${this.exams.length} selected exam filenames now match students. Matching complete. You can now create their preview PDFs.`;
+  }
+  async createPreviews(): Promise<void> {
+    if (this.busy || !this.completed || !this.folder || !this.drive.matchingAccess || this.previewExport?.complete) return;
+    this.previewExportOpen = true;
+    this.begin('Preparing exam previews…', true, 'previews');
+    try {
+      this.previewExport ??= new ExamPreviewExport(this.folder, this.exams);
+      const { createExamPreviewPdf } = await import('./pdf');
+      await this.previewExport.run(this.drive, async exam => {
+        const source = this.previews.get(exam.id);
+        if (!source) throw new Error('The exam is no longer loaded. Download the selected exams again.');
+        return createExamPreviewPdf(source.bytes, this.controller!.signal);
+      }, (message, saved, total) => {
+        this.message = message; this.progress = saved / total * 100; this.updateProgress();
+      });
+      this.previewExportOpen = false;
+    } catch (error) {
+      this.failure(error);
+      this.message = `${this.previewExport?.savedCount || 0} of ${this.exams.length} previews saved. Keep this tab open and retry to resume.`;
+    } finally { this.end(); }
   }
   selectFile(id: string, included: boolean): void {
     if (this.busy || !this.available.some(file => file.id === id)) return;
@@ -153,6 +180,7 @@ export class MatchingTask {
     this.selectionChanged();
   }
   private selectionChanged(): void {
+    this.clearPreviewExport();
     this.clearPreview(); this.exams = []; this.reviewOpen = this.completed = false;
     this.error = ''; this.message = `${this.included.size} of ${this.available.length} PDFs selected.`;
     const scrollTop = document.querySelector('.matching-file-list')?.scrollTop || 0;
@@ -190,6 +218,8 @@ export class MatchingTask {
       case 'match-preload': void this.preload(); break;
       case 'match-files': this.filesOpen = !this.filesOpen; this.refresh(); break;
       case 'match-review': this.reviewOpen = !this.reviewOpen; this.refresh(); break;
+      case 'match-previews': if (this.completed) { this.previewExportOpen = !this.previewExportOpen; this.refresh(); } break;
+      case 'match-create-previews': void this.createPreviews(); break;
       case 'match-select-all': this.included = new Set(this.available.map(file => file.id)); this.selectionChanged(); break;
       case 'match-select-none': this.included.clear(); this.selectionChanged(); break;
       case 'match-setup': this.setupOpen = !this.setupOpen; this.refresh(); break;
@@ -207,6 +237,7 @@ export class MatchingTask {
     const disable = (value: boolean) => value ? 'disabled' : '';
     const exam = this.crop ? this.exams[this.index] : undefined, student = this.selected();
     const done = this.exams.filter(exam => this.recognized(exam)).length;
+    const savedPreviews = this.previewExport?.savedCount || 0;
     return `<section id="panel-match" role="tabpanel" aria-labelledby="task-match">
       <div class="intro"><div><p class="eyebrow">MATCH STUDENTS</p><h1>A name for every exam.</h1><p class="lead-copy">Start with a folder of already-sliced exams and a student CSV list. <br>Read the handwritten name, choose a student, and rename the PDF.</p></div></div>
       <div role="alert" class="alert alert-danger" ${this.error ? '' : 'hidden'}>${html(this.error)}</div>
@@ -241,6 +272,20 @@ export class MatchingTask {
         <div class="matching-save"><div><span>New filename</span><strong id="match-target">${html(student?.filename || 'Choose a student from the suggestions.')}</strong><small>Renames the existing file in Drive. PDF contents stay unchanged.</small></div><button id="match-save" class="btn btn-primary" ${disable(this.busy || !student || !this.crop || !this.drive.connected)}>Rename & next</button></div>
         ` : ''}
       </div></section>
+      <section class="subtask workspace-panel ${this.busy && this.busyStage === 'previews' ? 'subtask-busy' : ''}">
+        <h2 class="subtask-heading"><button id="match-previews" aria-expanded="${this.previewExportOpen}" aria-controls="match-previews-body" ${disable(this.busy || !this.completed)}><span class="step-number">4</span><span class="subtask-title">Create exam previews<small>${this.completed ? `${savedPreviews} of ${this.exams.length} previews saved` : 'Available after all selected exams have student filenames'}</small></span><span aria-hidden="true">${this.previewExportOpen ? '⌃' : '⌄'}</span></button></h2>
+        <div id="match-previews-body" class="subtask-body" ${this.previewExportOpen ? '' : 'hidden'}>
+          <div class="selection-step"><div class="step-heading"><h3>Front-page previews</h3></div><p>Create one PDF per selected exam containing the full-width upper 20% of its first page. Previews keep the exam filenames, so you can select 04_Previews in Prepare drafts to send them to students.</p>
+            <div class="file-selection ${this.previewExport?.folder ? 'has-selection' : ''}"><div><strong>${this.previewExport?.folder ? `<a href="https://drive.google.com/drive/folders/${encodeURIComponent(this.previewExport.folder.id)}" target="_blank" rel="noopener">04_Previews ↗</a>` : '04_Previews'}</strong><span>Beside ${html(this.folder?.name || 'the selected exam folder')}, inside the Test folder. Created if needed.</span></div></div>
+            <p class="folder-hint">Existing preview filenames are kept. A retry resumes the remaining files.</p>
+          </div>
+          ${this.completed ? `<div class="result-list">${this.exams.map(exam => {
+            const row = this.previewExport?.rows.find(row => row.source.id === exam.id);
+            return `<article class="result-row"><div class="result-info"><strong>${html(examPreviewFilename(exam.name))}</strong><span>Front page · upper 20%</span></div><div class="result-actions">${row?.saved ? `<a class="saved-link" href="https://drive.google.com/file/d/${encodeURIComponent(row.id!)}/view" target="_blank" rel="noopener">${row.existing ? 'Already saved' : 'Saved'} ↗</a>` : '<span class="pending-label">Pending</span>'}</div></article>`;
+          }).join('')}</div>` : ''}
+          <div class="panel-footer"><span>${savedPreviews} / ${this.exams.length} previews saved to Drive.</span><button id="match-create-previews" class="btn btn-primary" ${disable(this.busy || !this.completed || !this.drive.matchingAccess || Boolean(this.previewExport?.complete))}>${this.busy && this.busyStage === 'previews' ? 'Creating previews…' : this.previewExport?.complete ? 'All previews saved' : this.previewExport ? 'Retry remaining previews' : 'Create previews'}</button></div>
+        </div>
+      </section>
       <div id="match-progress" tabindex="-1" class="progress-area ${this.busy ? 'progress-active progress-island' : this.completed ? 'matching-complete' : ''}" ${this.message ? '' : 'hidden'}><div class="progress-caption"><span role="status" aria-live="polite">${html(this.message)}</span>${this.busy && !this.saving ? '<button id="match-cancel" class="btn btn-sm btn-outline-secondary">Cancel loading</button>' : ''}</div>${this.busy ? `<div class="progress ${this.progress === null ? 'progress-indeterminate' : ''}" role="progressbar" aria-label="Matching progress" ${this.progress === null ? '' : `aria-valuenow="${Math.round(this.progress)}"`} aria-valuemin="0" aria-valuemax="100"><div class="progress-bar" style="width:${this.progress === null ? 35 : this.progress}%"></div></div>` : ''}</div>
     </section>`;
   }

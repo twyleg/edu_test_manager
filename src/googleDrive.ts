@@ -299,11 +299,15 @@ export class GoogleDrive {
   }
 
   async listFolderPdfs(folderId: string, signal?: AbortSignal): Promise<DriveItem[]> {
+    return this.listFolderItems(folderId, pdfMimeType, signal);
+  }
+
+  async listFolderItems(folderId: string, mimeType?: string, signal?: AbortSignal): Promise<DriveItem[]> {
     const files: DriveItem[] = [];
     let pageToken = '';
     do {
       const escaped = folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      const params = new URLSearchParams({ q: `'${escaped}' in parents and trashed = false and mimeType = 'application/pdf'`,
+      const params = new URLSearchParams({ q: `'${escaped}' in parents and trashed = false${mimeType ? ` and mimeType = '${mimeType}'` : ''}`,
         fields: 'nextPageToken,incompleteSearch,files(id,name,mimeType)', pageSize: '1000', orderBy: 'name_natural',
         supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', ...(pageToken ? { pageToken } : {}) });
       const response = await this.request(`https://www.googleapis.com/drive/v3/files?${params}`, { signal });
@@ -313,6 +317,32 @@ export class GoogleDrive {
       pageToken = data.nextPageToken || '';
     } while (pageToken);
     return files;
+  }
+
+  async copyScan(item: DriveItem, sourceFolderId: string, destinationFolderId: string, name: string, copyId: string): Promise<DriveItem> {
+    // The job keeps this pre-generated ID, including when a successful response is lost.
+    const existing = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(copyId)}?fields=id,name,mimeType,parents,trashed&supportsAllDrives=true`, {}, [404]);
+    if (existing.ok) {
+      const copy = await existing.json() as DriveItem & { parents?: string[]; trashed?: boolean };
+      if (copy.trashed || copy.mimeType !== pdfMimeType || copy.name !== name || !copy.parents?.includes(destinationFolderId)) {
+        throw new Error('The prepared scan copy was changed or moved. Restore it in 01_Scans before retrying.');
+      }
+      return copy;
+    }
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}`;
+    const response = await this.request(`${url}?fields=mimeType,parents,trashed&supportsAllDrives=true`);
+    const metadata = await response.json() as { mimeType: string; parents?: string[]; trashed?: boolean };
+    if (metadata.trashed || metadata.mimeType !== pdfMimeType) throw new Error('The selected scan is no longer an available PDF.');
+    if (!metadata.parents?.includes(sourceFolderId)) throw new Error('The scan is no longer in the input folder. Refresh the file list.');
+    const siblings = await this.listFolderPdfs(destinationFolderId);
+    if (siblings.some(file => file.name.normalize('NFC').toLocaleLowerCase() === name.normalize('NFC').toLocaleLowerCase())) {
+      throw new Error('A scan with this filename already exists in the destination folder.');
+    }
+    const copied = await this.request(`${url}/copy?supportsAllDrives=true&fields=id,name,mimeType`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: copyId, name, parents: [destinationFolderId] }),
+    });
+    return await copied.json() as DriveItem;
   }
 
   async renameExam(item: DriveItem, folderId: string, name: string): Promise<void> {
@@ -334,6 +364,18 @@ export class GoogleDrive {
     if (info.mimeType !== folderMimeType || info.trashed || !info.capabilities?.canAddChildren) {
       throw new Error('You cannot add files to this folder. Choose a writable output folder.');
     }
+  }
+
+  async getParentFolder(item: DriveItem): Promise<DriveItem> {
+    const response = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}?fields=parents,mimeType,trashed&supportsAllDrives=true`);
+    const info = await response.json() as { parents?: string[]; mimeType?: string; trashed?: boolean };
+    if (info.trashed || info.mimeType !== folderMimeType || info.parents?.length !== 1) {
+      throw new Error('Choose an exam folder inside a Test folder so 04_Previews can be created beside it.');
+    }
+    const parentResponse = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(info.parents[0])}?fields=id,name,mimeType,trashed&supportsAllDrives=true`);
+    const parent = await parentResponse.json() as DriveItem & { trashed?: boolean };
+    if (parent.trashed || parent.mimeType !== folderMimeType) throw new Error('The Test folder is no longer available. Choose the exam folder again.');
+    return parent;
   }
 
   async generateFileId(): Promise<string> {

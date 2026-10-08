@@ -19,6 +19,7 @@ test('sample scan yields three original-quality, two-page PDFs', async ({ page }
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await selectLocal(page, await readFile(samplePath), path.basename(samplePath));
   await expect(page.locator('.page-card')).toHaveCount(6);
   await expect(page.locator('.exam-group')).toHaveCount(3);
@@ -61,6 +62,7 @@ test('unmarked pages require explicit correction and preserve page order when sp
   const pdf = await PDFDocument.create();
   for (let index = 0; index < 3; index++) pdf.addPage([400 + index * 10, 600]);
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await selectLocal(page, Buffer.from(await pdf.save()), 'Blank test.pdf');
   await expect(page.getByRole('alert')).toContainText('No QR markers found');
   await expect(page.locator('.unassigned-group')).toHaveCount(1);
@@ -99,6 +101,7 @@ test('unmarked pages require explicit correction and preserve page order when sp
 
 test('invalid PDFs fail cleanly and scanning can be cancelled', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.locator('#local-pdf').setInputFiles({ name: 'bad.pdf', mimeType: 'application/pdf', buffer: Buffer.from('not a PDF') });
   await page.getByRole('button', { name: 'Scan PDF', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('Could not read this PDF');
@@ -114,6 +117,7 @@ test('invalid PDFs fail cleanly and scanning can be cancelled', async ({ page })
 
 test('thread setting is bounded and keywords alone do not mark front pages', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   const threads = page.getByRole('spinbutton', { name: 'Scan threads' });
   await expect(threads).toHaveValue('2');
   await threads.fill('99');
@@ -144,6 +148,7 @@ test('parallel scanning preserves order and ignores QR codes below the header', 
   });
   pdf.addPage([front.width, front.height]).drawPage(front);
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('spinbutton', { name: 'Scan threads' }).fill('4');
   await page.getByRole('spinbutton', { name: 'Scan threads' }).press('Tab');
   await selectLocal(page, Buffer.from(await pdf.save()));
@@ -157,6 +162,7 @@ test('parallel scanning preserves order and ignores QR codes below the header', 
 test('cancelling active parallel workers releases previews and allows a fresh scan', async ({ page }) => {
   test.skip(!existsSync(samplePath), 'Private example PDF is not present.');
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   const bytes = (await readFile(samplePath)).toString('base64');
   const result = await page.evaluate(async bytes => {
     const modulePath = '/src/pdf.ts';

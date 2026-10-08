@@ -6,6 +6,7 @@ import './styles/main.css';
 import { BatchSendTask } from './batchSend';
 import { DraftTask } from './drafts';
 import { MatchingTask } from './matching';
+import { PreparationTask } from './preparation';
 import { GoogleDrive } from './googleDrive';
 import { openPagePreview } from './pagePreview';
 import { openNewFolderDialog } from './folderDialog';
@@ -16,18 +17,19 @@ import { renderApp, type AppState } from './view';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const drive = new GoogleDrive();
-const state: AppState = { task: 'slice', expanded: { setup: true, review: false, save: false }, ready: false, connected: false, busy: '', pages: [], frontPages: [], files: [],
+const state: AppState = { task: 'preparation', expanded: { setup: true, review: false, save: false }, ready: false, connected: false, busy: '', pages: [], frontPages: [], files: [],
   uploadStarted: false, message: '', error: '', progress: 0, scanThreads: 2 };
 let sourceBytes: Uint8Array | undefined;
 let controller: AbortController | undefined;
-let pickerTask: 'slice' | 'match' | 'drafts' = 'slice';
+let pickerTask: 'preparation' | 'slice' | 'match' | 'drafts' = 'slice';
 const matching = new MatchingTask(drive, render, busy => { state.busy = busy ? 'match' : ''; });
 const batchSend = new BatchSendTask(drive, render, busy => { state.busy = busy ? 'send' : ''; });
 const drafts = new DraftTask(drive, render, busy => { state.busy = busy ? 'drafts' : ''; });
+const preparation = new PreparationTask(drive, render, busy => { state.busy = busy ? 'preparation' : ''; });
 
 function render(): void {
   const focused = document.activeElement?.id;
-  app.innerHTML = renderApp(state, state.task === 'match' ? matching.render(state.ready && hasGoogleConfig()) : '', state.task === 'drafts' ? drafts.render(state.ready && hasGoogleConfig()) : '', state.task === 'send' ? batchSend.render(state.ready && hasGoogleConfig()) : '');
+  app.innerHTML = renderApp(state, state.task === 'match' ? matching.render(state.ready && hasGoogleConfig()) : '', state.task === 'drafts' ? drafts.render(state.ready && hasGoogleConfig()) : '', state.task === 'send' ? batchSend.render(state.ready && hasGoogleConfig()) : '', state.task === 'preparation' ? preparation.render(state.ready && hasGoogleConfig()) : '');
   if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
 }
 // Keep the existing bar mounted so chunk updates do not restart its animation
@@ -190,6 +192,12 @@ app.addEventListener('click', event => {
       drafts.pick(target.id === 'draft-extra-drive' ? 'attachment' : target.id === 'draft-folder' ? 'folder' : 'csv');
       return;
     }
+    if (target.id === 'prep-input' || target.id === 'prep-folder') {
+      pickerTask = 'preparation'; state.busy = 'picker'; state.error = ''; render();
+      preparation.pick(target.id === 'prep-input' ? 'input' : 'course');
+      return;
+    }
+    if (state.task === 'preparation' && preparation.handle(target.id)) return;
     if (state.task === 'send' && batchSend.handle(target.id)) return;
     if (state.task === 'drafts' && drafts.handle(target.id)) return;
     if (target.id === 'match-folder' || target.id === 'match-csv') {
@@ -227,7 +235,7 @@ app.addEventListener('click', event => {
     switch (target.id) {
       case 'connect':
         if (drive.connected) {
-          drive.disconnect(); batchSend.reset(); drafts.reset(); matching.reset(); clearScan(); state.source = state.folder = state.localFile = undefined; render();
+          drive.disconnect(); batchSend.reset(); drafts.reset(); matching.reset(); preparation.reset(); clearScan(); state.source = state.folder = state.localFile = undefined; render();
         } else drive.connect();
         break;
       case 'choose-pdf': case 'choose-folder':
@@ -279,6 +287,7 @@ app.addEventListener('dragend', () => { draggedPage = undefined; });
 
 app.addEventListener('input', event => {
   const input = event.target as HTMLInputElement;
+  if (state.task === 'preparation' && !state.busy && input.id.startsWith('prep-')) preparation.change(input.id, input.value);
   if (input.id === 'student-search') matching.input(input.value);
   if (state.task === 'drafts' && ['draft-subject', 'draft-body', 'draft-labels'].includes(input.id)) drafts.input(input.id, input.value);
 });
@@ -287,7 +296,7 @@ app.addEventListener('keydown', event => {
   const target = event.target as HTMLElement;
   if (target.id === 'student-search') { matching.keydown(event); return; }
   if (!target.dataset.task || state.busy) return;
-  const tabs = ['slice', 'match', 'drafts', 'send'];
+  const tabs = ['preparation', 'slice', 'match', 'drafts', 'send'];
   const index = tabs.indexOf(state.task);
   const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
   if (next < 0) return;
@@ -297,6 +306,7 @@ app.addEventListener('keydown', event => {
 
 app.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
+  if (state.task === 'preparation' && !state.busy && input.id.startsWith('prep-')) { preparation.change(input.id, input.value); return; }
   if (input.id === 'draft-extra') { if (!state.busy && input.files?.[0]) drafts.attachments(Array.from(input.files)); return; }
   if (input.dataset.sendRow !== undefined) {
     if (!state.busy) batchSend.select(Number(input.dataset.sendRow), input.checked);
@@ -334,7 +344,7 @@ app.addEventListener('change', event => {
 });
 
 window.addEventListener('beforeunload', event => {
-  if (state.busy || drafts.hasIncompleteBatch || (state.uploadStarted && state.files.some(file => !file.uploaded))) event.preventDefault();
+  if (state.busy || preparation.hasIncompleteJob || matching.hasIncompletePreviewExport || drafts.hasIncompleteBatch || (state.uploadStarted && state.files.some(file => !file.uploaded))) event.preventDefault();
 });
 
 let googleInitialization: Promise<void> | undefined;
@@ -345,6 +355,7 @@ function initializeGoogle(): void {
     onError: message => { state.busy = ''; reportError(new Error(message)); },
     onPickerClosed: () => { state.busy = ''; render(); },
     onPick: (kind, item, items) => {
+      if (pickerTask === 'preparation') { preparation.accept(item); render(); return; }
       if (pickerTask === 'drafts') { drafts.accept(item, items); render(); return; }
       if (pickerTask === 'match') { matching.accept(item); render(); return; }
       if (kind === 'pdf') { clearScan(); state.localFile = undefined; state.source = item; }

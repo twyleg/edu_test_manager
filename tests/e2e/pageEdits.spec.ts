@@ -8,6 +8,7 @@ test('page edits update previews and output, while front pages remain protected'
   for (let i = 0; i < 6; i++) source.addPage([400 + i * 10, 600]);
   source.getPage(2).setRotation(degrees(90));
   await page.goto('/');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.locator('#local-pdf').setInputFiles({ name: 'edits.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source.save()) });
   await page.getByRole('button', { name: 'Scan PDF', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Scan complete');

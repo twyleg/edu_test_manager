@@ -9,6 +9,7 @@ test('Pages subpath serves fonts, workers, privacy, and the Picker relay', async
   page.on('response', response => { if (response.status() >= 400) failed.push(response.url()); });
   page.on('request', request => { if (request.url().endsWith('.woff2')) fonts.push(request.url()); });
   await page.goto('./');
+  await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.evaluate(() => document.fonts.ready);
   await expect(page.getByRole('tab', { name: 'Slice exams' })).toBeVisible();
   expect(fonts.length).toBeGreaterThan(0);

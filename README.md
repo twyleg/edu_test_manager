@@ -40,8 +40,9 @@ For deployment, run `npm run build`, host `dist/` on HTTPS, add the production o
 
 ## Tasks and subtasks
 
-The application has four independent **Tasks**, shown as tabs. They are entry points, not mandatory sequential steps:
+The application has five independent **Tasks**, shown as tabs. **Preparation** opens by default. They are entry points, not mandatory sequential steps:
 
+- **Preparation**: organize an original scanner PDF in a numbered test folder, create the standard subfolders, and copy the scan into `01_Scans`.
 - **Slice exams**: split a combined scan into individual exam PDFs. This task is implemented and can be completed without matching students or preparing email drafts.
 - **Match students**: start directly with a Google Drive folder containing already-sliced exams and a student CSV list. Match exams to students using their handwritten names. Slicing need not happen in the same session or in this application.
 - **Batch send**: independently load drafts using the Gmail label `bulk-send`, select messages and send them explicitly.
@@ -56,6 +57,32 @@ Actions within a task are called **Subtasks**. Slice exams has three vertically 
 3. **Save individual PDFs**: preview, download or save the prepared files to Drive.
 
 During downloading, scanning, preparation or upload, the active banner is muted and a floating progress island at the bottom of the viewport receives focus. It stays visible while scrolling, then returns to an inline status message when processing ends. Drive downloads first request the PDF size from Drive metadata, then show a growing bar and percentage based on received bytes—even when the download response omits Content-Length. If neither metadata nor response headers provide a usable size, an activity bar and received-byte count remain the fallback. Downloads can be cancelled with Cancel scan. Successful completion folds that subtask and opens the next; after saving to Drive, the final subtask folds with its saved-file count in the header. Completed panels can be reopened to inspect their contents. Errors and cancellation keep the relevant panel open for correction or retry. Unavailable subtasks remain folded until their inputs exist. Starting a new batch returns to the first subtask.
+
+## Preparation workflow
+
+1. Open **Preparation**, then **Enable folder access**. Preparation uses the same broader Drive scope as matching, so it can list existing scanner files and test folders.
+2. Choose the scanner input folder and select a PDF from its file list. **Preview scan** opens that PDF with previous/next page navigation so you can identify its contents. Only the selected PDF is downloaded for preview; closing the preview cancels pending work and releases its data. **Refresh files** reloads that list.
+3. Choose the existing **Course folder**, for example `Informatik/08/2026-2027/8a`. The subject, school-year and calendar-year hierarchy is maintained manually; Preparation creates folders within the selected Course folder.
+4. Choose **Physik** or **Informatik**, and **LZK** or **Klausur**. Check the class code derived from the Course folder name, enter the test topic, and choose the test date (defaults to today in Europe/Berlin).
+5. Review the filename preview, then click **Start preparation**. The app ensures the Course folder has `LZKs` and `Klausuren`, then creates the next numbered test folder in the selected type folder. Numbering uses the highest existing numeric folder prefix plus one, independently for each type, with at least two digits. Topic whitespace becomes hyphens, preserving umlauts.
+
+For example, Informatik / LZK / 8a / Zahlen Konvertieren Dezimal Dual on 2026-10-03 produces:
+
+```text
+8a/
+├── Klausuren/
+└── LZKs/
+    └── 01_Zahlen-Konvertieren-Dezimal-Dual/
+        ├── 01_Scans/
+        │   └── 20261003_LZK-IF8a-Zahlen-Konvertieren-Dezimal-Dual.pdf
+        ├── 02_Korrigiert/
+        ├── 03_Split/
+        └── 04_Previews/
+```
+
+A renamed copy of the Drive file is saved to `01_Scans` after all required folders are ready. The original stays unchanged in the scanner input folder. Filename format is `YYYYMMDD_{KA|LZK}-{PH|IF}{class}-{topic}.pdf`. Preparation rejects ambiguous required folder names and existing destination filenames. If an operation fails, keep the tab open and use **Retry preparation**; the in-memory job keeps stable folder and copy IDs to resume without creating another test or duplicate scan copy. Job inputs stay locked once preparation starts. Reloading loses this job state; inspect the folders in Drive before starting again. Prepare only one test at a time per Course/type folder across tabs or devices, since Drive does not enforce unique names or reserve numbering atomically.
+
+Preparation finishes after copying the scan and shows links to the test folders. **Prepare another test** clears the completed preparation form. After grading, save the combined corrected PDF to `02_Korrigiert`. When it is ready, open **Slice exams**, choose that PDF as input, and select `03_Split` as the output folder.
 
 ## Slice exams workflow
 
@@ -82,7 +109,9 @@ If upload fails, reconnect if required and click **Retry remaining uploads**. Su
 4. Click **Find exams & students**. The setup subtask folds and **Select exam files** opens with all PDFs directly in that folder checked by default. Uncheck files to exclude them, or use **Select all** / **Select none**. Listing includes all result pages and does not download the exam PDFs. Click **Download & start matching** to preload only the selected PDFs and render their name previews; the selection panel then folds and **Match students & rename** opens. Progress and cancellation are available during preloading. Moving between exams uses this in-memory cache, without downloading again. Subfolders and non-PDFs are excluded.
 5. Inspect the right half of the front page's top quarter. **View full front page** shows the rest if handwriting falls outside this area. Type a first or last name in **Student** and choose a suggestion. Suggestions include the student number and email address. Tab completes the name when only one matching student remains; ambiguous queries are not completed. Once a student is selected, Enter performs **Rename & next**; no OCR or automatic handwriting assignment is used.
 6. Check the proposed filename and click **Rename & next**. This immediately renames the existing Drive file to `Nr_Nachname_Vorname.pdf`, preserving spelling and umlauts (for example `01_Müller_Anna.pdf`). Characters unsuitable for filenames are replaced with hyphens. PDF contents, file IDs and folder location stay unchanged.
-7. Continue with the next unmatched selected exam. After the final match, the matching panel folds automatically and a completion message appears below it. Reopen its banner to review any exam. All three subtask banners remain visible, with unavailable panels folded and disabled. **Previous** and **Next / skip for now** let you revisit pages. Already-named files are recognized by exact filename; this is not proof that the handwritten name is correct, so they remain reviewable.
+7. Continue with the next unmatched selected exam. After the final match, the matching panel folds automatically and a completion message appears below it. Reopen its banner to review any exam. All four subtask banners remain visible, with unavailable panels folded and disabled. **Previous** and **Next / skip for now** let you revisit pages. Already-named files are recognized by exact filename; this is not proof that the handwritten name is correct, so they remain reviewable.
+8. Once every selected exam has a student filename, **Create exam previews** opens. Click **Create previews** to save one preview per selected exam. Previews keep the exact exam filenames, for example `04_Previews/01_Müller_Anna.pdf`. Select `04_Previews` as the exam folder in **Prepare drafts** to match and send these previews using the existing student CSV. Each preview is a single-page PDF showing only the full-width upper 20% of the front page, respecting its displayed rotation and crop box. The header is rendered into the new PDF, so the remaining page content and subsequent pages are excluded.
+9. Previews are saved in `04_Previews` beside the selected exam folder (normally `03_Split`), within the same Test folder. The folder is created if missing. Existing preview filenames are kept; duplicate folder or preview names must be resolved before continuing. Progress and links to saved files appear in the subtask. If an upload fails, keep this tab open and choose **Retry remaining previews**. Stable file IDs prevent duplicate uploads after a lost response. Reopening matching with the same files recognizes existing previews instead of uploading them again.
 
 The `Nr.` column must contain unique numeric student numbers; filename numbers are padded to at least two digits (1 becomes 01). Existing leading zeros and numbers longer than two digits are preserved. Students with identical names are distinguished by their numbers. Before each rename the folder is checked again for a conflicting PDF name; existing PDFs are never overwritten. Drive does not offer an atomic unique-filename constraint, so concurrent changes from another app can still introduce duplicates. A retry after a lost rename response recognizes the completed rename. Errors leave the current exam available for retry or another choice.
 
