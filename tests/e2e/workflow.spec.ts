@@ -50,7 +50,14 @@ test('saved workflow derives folders and switches between preview and final draf
                   },
                 ]
               : q.includes("'corrected'")
-                ? [{ id: 'pdf', name: 'Corrected exam.pdf', mimeType: 'application/pdf' }]
+                ? [
+                    { id: 'pdf', name: 'Corrected exam.pdf', mimeType: 'application/pdf' },
+                    {
+                      id: 'second-pdf',
+                      name: 'Second corrected exam.pdf',
+                      mimeType: 'application/pdf',
+                    },
+                  ]
                 : [];
     await route.fulfill({ json: { files } });
   });
@@ -89,8 +96,28 @@ test('saved workflow derives folders and switches between preview and final draf
   await expect(page.locator('#workflow-test-menu')).toBeHidden();
   await expect(page.locator('#workflow-test')).toBeFocused();
   await page.getByRole('tab', { name: 'Slice exams' }).click();
-  await expect(page.locator('#slice-file option')).toHaveCount(1);
-  await page.locator('#slice-file').selectOption('pdf');
+  await expect(page.locator('#slice-file')).toHaveCount(0);
+  await expect(page.locator('#slice-file-list')).toBeVisible();
+  await expect(page.locator('#slice-file-list .test-menu-choice')).toHaveCount(2);
+  await expect(page.locator('#slice-file-list')).not.toContainText('Choose a corrected PDF');
+  await page.locator('[data-slice-file-id="second-pdf"]').click();
+  await expect(page.locator('[data-slice-file-id="second-pdf"]')).toBeFocused();
+  await expect(page.locator('[data-slice-file-id="second-pdf"]')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.locator('#slice-file-list')).toBeVisible();
+  await page.getByRole('button', { name: 'Choose files & scan' }).click();
+  await expect(page.locator('#slice-file-list')).toBeHidden();
+  await page.getByRole('button', { name: 'Choose files & scan' }).click();
+  await expect(page.locator('#slice-file-list')).toBeVisible();
+  await page.locator('[data-slice-file-id="pdf"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('[data-slice-file-id="pdf"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-slice-file-id="second-pdf"]')).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
   await expect(page.getByRole('tabpanel')).toContainText('Corrected exam.pdf');
   await expect(page.getByRole('tabpanel')).toContainText('03_Split');
   await page.getByRole('tab', { name: 'Match students' }).click();
@@ -125,17 +152,25 @@ test('saved workflow derives folders and switches between preview and final draf
     }),
   );
   await page.getByRole('button', { name: 'Change input folder' }).click();
-  await expect(page.locator('#slice-file')).toContainText('Another corrected exam.pdf');
-  await page.locator('#slice-file').selectOption('alternate-pdf');
+  await expect(page.locator('#slice-file-list .test-menu-choice')).toHaveCount(1);
+  await expect(page.locator('#slice-file-list')).toContainText('Another corrected exam.pdf');
+  await page.locator('[data-slice-file-id="alternate-pdf"]').click();
   await page.getByRole('button', { name: 'Change output folder' }).click();
   await page.getByRole('tab', { name: 'Match students' }).click();
   await page.getByRole('tab', { name: 'Slice exams' }).click();
   await expect(page.locator('.slice-source')).toContainText('Other corrected scans');
   await expect(page.locator('.slice-destination')).toContainText('Other split exams');
-  await expect(page.locator('#slice-file')).toHaveValue('alternate-pdf');
+  await expect(page.locator('[data-slice-file-id="alternate-pdf"]')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
   await page.screenshot({ path: 'test-results/slice-folders-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: 'test-results/slice-folders-mobile.png', fullPage: true });
+  const listBounds = await page.locator('#slice-file-list').boundingBox();
+  expect(listBounds).not.toBeNull();
+  expect(listBounds!.x).toBeGreaterThanOrEqual(0);
+  expect(listBounds!.x + listBounds!.width).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.locator('#workflow-test').click();
   await page.locator('#test-clear').click();
@@ -144,7 +179,22 @@ test('saved workflow derives folders and switches between preview and final draf
   await page.locator('#test-choice-0').click();
   await expect(page.locator('.slice-source')).toContainText('02_Korrigiert');
   await expect(page.locator('.slice-destination')).toContainText('03_Split');
-  await expect(page.locator('#slice-file')).toHaveValue('');
+  await expect(page.locator('#slice-file-list [aria-pressed="true"]')).toHaveCount(0);
+  await page.evaluate(() =>
+    Object.assign(window, {
+      __mockFolderSelections: [{ id: 'empty-input', name: 'Empty corrected scans' }],
+    }),
+  );
+  await page.getByRole('button', { name: 'Change input folder' }).click();
+  await expect(page.locator('#slice-file-list')).toContainText('No PDFs available in this folder.');
+  await expect(page.locator('#slice-file-list .test-menu-choice')).toHaveCount(0);
+  await expect(page.locator('#scan')).toBeDisabled();
+  await page.evaluate(() =>
+    Object.assign(window, {
+      __mockFolderSelections: [{ id: 'corrected', name: '02_Korrigiert' }],
+    }),
+  );
+  await page.getByRole('button', { name: 'Change input folder' }).click();
   await page.getByRole('tab', { name: 'Match students' }).click();
   await page.evaluate(() =>
     Object.assign(window, {
@@ -189,6 +239,8 @@ test('topbar selections stay compact and accessible on mobile', async ({ page })
   await page.locator('#connect').click();
   await expect(page.locator('#prep-input')).toBeVisible();
   await page.locator('#workflow-csv').click();
+  await expect(page.locator('#workflow-student-menu')).toBeVisible();
+  await page.keyboard.press('Escape');
   for (const key of ['csv', 'course']) {
     await expect(page.locator(`.topbar #workflow-${key}`)).toBeVisible();
   }

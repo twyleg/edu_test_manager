@@ -11,7 +11,54 @@ export interface WorkflowPaths {
   csv?: DriveItem;
   course?: DriveItem;
   test?: DriveItem;
+  recentCourses?: DriveItem[];
+  recentStudentLists?: DriveItem[];
 }
+
+function isCourseFolder(item: unknown): item is DriveItem {
+  if (!item || typeof item !== 'object') {
+    return false;
+  }
+  const folder = item as DriveItem;
+  return (
+    typeof folder.id === 'string' &&
+    Boolean(folder.id) &&
+    typeof folder.name === 'string' &&
+    folder.mimeType === folderMimeType
+  );
+}
+
+export function rememberCourse(paths: WorkflowPaths, course: DriveItem): void {
+  paths.recentCourses = [course, ...(paths.recentCourses || [])]
+    .filter(
+      (folder, index, courses) => courses.findIndex((entry) => entry.id === folder.id) === index,
+    )
+    .slice(0, 10);
+}
+
+function isStudentList(item: unknown): item is DriveItem {
+  if (!item || typeof item !== 'object') {
+    return false;
+  }
+  const file = item as DriveItem;
+  return (
+    typeof file.id === 'string' &&
+    Boolean(file.id) &&
+    typeof file.name === 'string' &&
+    /\.csv$/i.test(file.name) &&
+    typeof file.mimeType === 'string' &&
+    file.mimeType !== folderMimeType
+  );
+}
+
+export function rememberStudentList(paths: WorkflowPaths, file: DriveItem): void {
+  paths.recentStudentLists = [file, ...(paths.recentStudentLists || [])]
+    .filter(
+      (entry, index, files) => files.findIndex((candidate) => candidate.id === entry.id) === index,
+    )
+    .slice(0, 10);
+}
+
 export function loadWorkflow(): WorkflowPaths {
   if (!rememberStudentFolder()) {
     return {};
@@ -31,6 +78,25 @@ export function loadWorkflow(): WorkflowPaths {
       ) {
         paths[key] = item;
       }
+    }
+    paths.recentCourses = [];
+    if (Array.isArray(saved.recentCourses)) {
+      for (const course of saved.recentCourses.filter(isCourseFolder).reverse()) {
+        rememberCourse(paths, course);
+      }
+    }
+    if (paths.course) {
+      rememberCourse(paths, paths.course);
+    }
+
+    paths.recentStudentLists = [];
+    if (Array.isArray(saved.recentStudentLists)) {
+      for (const file of saved.recentStudentLists.filter(isStudentList).reverse()) {
+        rememberStudentList(paths, file);
+      }
+    }
+    if (paths.csv) {
+      rememberStudentList(paths, paths.csv);
     }
     return paths;
   } catch {
@@ -87,18 +153,30 @@ export function renderWorkflowInputs(
   tests: DriveItem[],
   access: boolean,
   testMenuOpen = false,
+  courseMenuOpen = false,
+  studentMenuOpen = false,
 ): string {
   return `<div class="topbar-inputs" role="group" aria-label="Workflow inputs">
-    ${(['course', 'csv'] as const)
-      .map(
-        (
-          key,
-          index,
-        ) => `<button id="workflow-${key}" class="topbar-input ${paths[key] ? 'is-selected' : ''}" title="${html(paths[key]?.name || ['Choose course directory', 'Choose student list'][index])}" aria-label="${html(`${['Course directory', 'Student list file'][index]}: ${paths[key]?.name || 'Choose…'}`)}" ${locked || !ready ? 'disabled' : ''}>
-      <span class="topbar-input-label">${['Course', 'Students'][index]}</span><span class="topbar-input-value">${html(paths[key]?.name || 'Choose…')}</span><span class="topbar-input-chevron" aria-hidden="true">⌄</span>
-    </button>`,
-      )
-      .join('')}
+    <div class="topbar-course">
+      <button id="workflow-course" class="topbar-input ${paths.course ? 'is-selected' : ''}" aria-expanded="${courseMenuOpen}" aria-controls="workflow-course-menu" aria-label="${html(`Course directory: ${paths.course?.name || 'Choose…'}`)}" title="${html(paths.course?.name || 'Choose course directory')}" ${locked || !ready ? 'disabled' : ''}>
+        <span class="topbar-input-label">Course</span><span class="topbar-input-value">${html(paths.course?.name || 'Choose…')}</span><span class="topbar-input-chevron" aria-hidden="true">⌄</span>
+      </button>
+      <section id="workflow-course-menu" class="test-menu course-menu" aria-label="Course selection" ${courseMenuOpen ? '' : 'hidden'}>
+        <div class="test-menu-heading"><strong>Recent courses</strong><span>Switch courses or choose another folder</span></div>
+        ${paths.recentCourses?.length ? `<div class="test-menu-list">${paths.recentCourses.map((course, index) => `<button id="course-choice-${index}" class="test-menu-choice" data-course-id="${html(course.id)}" aria-pressed="${paths.course?.id === course.id}" ${locked ? 'disabled' : ''}><span><strong>${html(course.name)}</strong></span><span class="test-menu-check" aria-hidden="true">${paths.course?.id === course.id ? '✓' : ''}</span></button>`).join('')}</div>` : '<p class="test-menu-empty">No recent courses yet. Pick a course folder below.</p>'}
+        <div class="test-menu-create"><button id="course-pick" class="btn btn-sm btn-primary" ${locked || !ready ? 'disabled' : ''}>Pick course from Google Drive</button></div>
+      </section>
+    </div>
+    <div class="topbar-students">
+    <button id="workflow-csv" class="topbar-input ${paths.csv ? 'is-selected' : ''}" aria-expanded="${studentMenuOpen}" aria-controls="workflow-student-menu" title="${html(paths.csv?.name || 'Choose student list')}" aria-label="${html(`Student list file: ${paths.csv?.name || 'Choose…'}`)}" ${locked || !ready ? 'disabled' : ''}>
+      <span class="topbar-input-label">Students</span><span class="topbar-input-value">${html(paths.csv?.name || 'Choose…')}</span><span class="topbar-input-chevron" aria-hidden="true">⌄</span>
+    </button>
+      <section id="workflow-student-menu" class="test-menu" aria-label="Student list selection" ${studentMenuOpen ? '' : 'hidden'}>
+        <div class="test-menu-heading"><strong>Recent student lists</strong><span>Switch lists or choose another CSV file</span></div>
+        ${paths.recentStudentLists?.length ? `<div class="test-menu-list">${paths.recentStudentLists.map((file, index) => `<button id="student-list-choice-${index}" class="test-menu-choice" data-student-list-id="${html(file.id)}" aria-pressed="${paths.csv?.id === file.id}" ${locked ? 'disabled' : ''}><span><strong>${html(file.name)}</strong></span><span class="test-menu-check" aria-hidden="true">${paths.csv?.id === file.id ? '✓' : ''}</span></button>`).join('')}</div>` : '<p class="test-menu-empty">No recent student lists yet. Pick a CSV file below.</p>'}
+        <div class="test-menu-create"><button id="student-list-pick" class="btn btn-sm btn-primary" ${locked || !ready ? 'disabled' : ''}>Pick student list from Google Drive</button></div>
+      </section>
+    </div>
     <div class="topbar-test">
       <button id="workflow-test" class="topbar-input ${paths.test ? 'is-selected' : ''}" aria-expanded="${testMenuOpen}" aria-controls="workflow-test-menu" title="${html(paths.test?.name || 'Choose a test')}" ${locked || !ready ? 'disabled' : ''}>
         <span class="topbar-input-label">Current test</span><span class="topbar-input-value">${html(paths.test?.name.split(' / ').at(-1) || 'Choose…')}</span><span class="topbar-input-chevron" aria-hidden="true">⌄</span>

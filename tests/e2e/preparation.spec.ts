@@ -91,6 +91,7 @@ test('confirms course setup, creates a test with retry, then imports scans into 
   await expect(page.locator('.import-details')).toBeVisible();
   await expect(page.getByLabel('Corrected PDF', { exact: true })).toHaveCount(0);
   await page.locator('#workflow-course').click();
+  await page.locator('#course-pick').click();
   const setup = page.getByRole('dialog', { name: 'Set up course folders' });
   await expect(setup).toContainText('LZKs');
   await expect(setup).toContainText('Klausuren');
@@ -202,7 +203,7 @@ test('confirms course setup, creates a test with retry, then imports scans into 
   expect(copies[1].parents).toEqual([find('02_Korrigiert').id]);
   expect(files.get('original')!.parents).toEqual(['scanner']);
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
-  await expect(page.locator('#slice-file')).toContainText(copies[1].name);
+  await expect(page.locator('#slice-file-list')).toContainText(copies[1].name);
   for (const item of [
     { id: 'info-course', name: '9b', mimeType: folderMime, parents: ['info-subject'] },
     { id: 'info-subject', name: 'Informatik', mimeType: folderMime, parents: ['root'] },
@@ -216,6 +217,7 @@ test('confirms course setup, creates a test with retry, then imports scans into 
     Object.assign(window, { __mockFolderSelections: [{ id: 'info-course', name: '9b' }] }),
   );
   await page.locator('#workflow-course').click();
+  await page.locator('#course-pick').click();
   await expect(page.getByLabel('Subject', { exact: true })).toHaveValue('Informatik');
   await expect(page.locator('#prep-course')).toHaveValue('9b');
 });

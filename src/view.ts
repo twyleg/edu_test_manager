@@ -61,6 +61,26 @@ const icon = (kind: 'file' | 'folder' | 'cut' | 'zoom') => {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind]}</svg>`;
 };
 
+function renderSliceFileList(state: AppState): string {
+  const files = state.correctedPdfs || [];
+  const disabled = Boolean(state.busy || state.uploadStarted || state.pages.length);
+  return `<div id="slice-file-list" class="slice-file-list" role="group" aria-label="Exam PDF" tabindex="-1">
+      <div class="test-menu-heading"><strong>Available PDFs</strong></div>
+      <div class="test-menu-list">
+        ${
+          files.length
+            ? files
+                .map((file, index) => {
+                  const selected = state.source?.id === file.id;
+                  return `<button id="slice-file-choice-${index}" class="test-menu-choice" data-slice-file-id="${escapeHtml(file.id)}" aria-pressed="${selected}" ${disabled ? 'disabled' : ''}><strong>${escapeHtml(file.name)}</strong>${selected ? '<span class="test-menu-check" aria-hidden="true">✓</span>' : ''}</button>`;
+                })
+                .join('')
+            : '<p class="test-menu-empty">No PDFs available in this folder.</p>'
+        }
+      </div>
+  </div>`;
+}
+
 export function renderApp(
   state: AppState,
   matchingPanel = '',
@@ -135,7 +155,7 @@ export function renderApp(
             ? `<div class="slice-folders">
           <div class="slice-source">
             <div class="slice-folder-heading"><div><span class="form-label">Input directory</span><strong>${escapeHtml(state.inputFolder?.name || '02_Korrigiert not found')}</strong></div><button id="choose-slice-input" class="btn btn-sm btn-outline-secondary" aria-label="Change input folder" ${disabled(locked || googleDisabled)}>Change</button></div>
-            <label for="slice-file" class="visually-hidden">Exam PDF</label><select id="slice-file" class="form-select slice-file-list" size="5" ${disabled(locked || pages.length > 0 || !state.correctedPdfs?.length)}>${state.correctedPdfs?.length ? '' : '<option value="">No PDFs available in this folder</option>'}${(state.correctedPdfs || []).map((file) => `<option value="${escapeHtml(file.id)}" ${state.source?.id === file.id ? 'selected' : ''}>${escapeHtml(file.name)}</option>`).join('')}</select>
+            ${renderSliceFileList(state)}
           </div>
           <div class="slice-destination"><div class="slice-folder-heading"><div><span class="form-label">Output directory</span><strong>${escapeHtml(state.folder?.name || '03_Split not found')}</strong></div><button id="choose-folder" class="btn btn-sm btn-outline-secondary" aria-label="Change output folder" ${disabled(locked || googleDisabled)}>Change</button></div></div>
         </div>`
@@ -143,7 +163,7 @@ export function renderApp(
           <div class="selection-step"><div class="step-heading"><h3>Choose the exam scan</h3></div>
             <p>The single PDF containing all students’ tests.</p>
             <div class="file-selection ${selected ? 'has-selection' : ''}"><span class="selection-icon">${icon('file')}</span><div><strong>${selected ? escapeHtml(selected) : 'No PDF selected'}</strong><span>${selected ? (state.localFile ? 'Local PDF · processed in your browser' : 'PDF from Google Drive') : 'Select a PDF from Google Drive'}</span></div></div>
-            ${state.correctedPdfs ? `<label for="slice-file" class="form-label">PDFs in 02_Korrigiert</label><select id="slice-file" class="form-select" ${disabled(locked || pages.length > 0)}><option value="">Choose a corrected PDF</option>${state.correctedPdfs.map((file) => `<option value="${escapeHtml(file.id)}" ${state.source?.id === file.id ? 'selected' : ''}>${escapeHtml(file.name)}</option>`).join('')}</select>` : ''}
+            ${state.correctedPdfs ? renderSliceFileList(state) : ''}
             <div class="selection-actions"><button id="choose-pdf" class="btn btn-outline-primary" ${disabled(locked || googleDisabled)}>Choose PDF from Drive</button>
               <label class="local-label ${locked ? 'disabled' : ''}">or use a local PDF<input id="local-pdf" type="file" accept="application/pdf,.pdf" ${disabled(locked)} /></label></div>
           </div>

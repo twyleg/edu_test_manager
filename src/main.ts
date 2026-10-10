@@ -15,6 +15,8 @@ import { confirmCourseSetup, openNewTestDialog } from './testDialogs';
 import {
   loadWorkflow,
   saveWorkflow,
+  rememberCourse,
+  rememberStudentList,
   listCourseTests,
   testFolders,
   renderWorkflowInputs,
@@ -58,6 +60,8 @@ let sliceTestId = paths.test?.id;
 let slicePickerTarget: 'input' | 'output' = 'output';
 let refreshingPaths = false;
 let testMenuOpen = false;
+let courseMenuOpen = false;
+let studentMenuOpen = false;
 let sourceBytes: Uint8Array | undefined;
 let controller: AbortController | undefined;
 let pickerTask: 'preparation' | 'slice' | 'match' | 'drafts' = 'slice';
@@ -173,7 +177,7 @@ async function loadSliceInput(folder: DriveItem): Promise<void> {
   } finally {
     state.busy = '';
     render();
-    document.getElementById('slice-file')?.focus();
+    document.getElementById('slice-file-list')?.focus();
   }
 }
 async function createTest(): Promise<void> {
@@ -238,6 +242,8 @@ function render(): void {
       tests,
       drive.matchingAccess,
       testMenuOpen,
+      courseMenuOpen,
+      studentMenuOpen,
     ),
     state.task === 'documentation' ? documentation.render(state.connected && !state.busy) : '',
   );
@@ -471,6 +477,63 @@ async function newFolder(): Promise<void> {
   }
 }
 
+function closeStudentMenu(focus = false): void {
+  studentMenuOpen = false;
+  document.getElementById('workflow-student-menu')?.setAttribute('hidden', '');
+  document.getElementById('workflow-csv')?.setAttribute('aria-expanded', 'false');
+  if (focus) {
+    document.getElementById('workflow-csv')?.focus();
+  }
+}
+
+function selectStudentList(file: DriveItem): void {
+  closeStudentMenu();
+  paths.csv = file;
+  rememberStudentList(paths, file);
+  applyPaths();
+  render();
+  document.getElementById('workflow-csv')?.focus();
+}
+
+function closeCourseMenu(focus = false): void {
+  courseMenuOpen = false;
+  document.getElementById('workflow-course-menu')?.setAttribute('hidden', '');
+  document.getElementById('workflow-course')?.setAttribute('aria-expanded', 'false');
+  if (focus) {
+    document.getElementById('workflow-course')?.focus();
+  }
+}
+
+async function selectCourse(course: DriveItem): Promise<void> {
+  closeCourseMenu();
+  rememberCourse(paths, course);
+  if (paths.course?.id === course.id) {
+    paths.course = course;
+    saveWorkflow(paths);
+    render();
+    document.getElementById('workflow-course')?.focus();
+    return;
+  }
+
+  paths.course = course;
+  checkedCourse = undefined;
+  courseSubjects.delete(course.id);
+  paths.test = undefined;
+  tests = [];
+  folders = {};
+  correctedPdfs = [];
+  clearScan();
+  state.localFile = undefined;
+  state.source = undefined;
+  applyPaths();
+  render();
+
+  if (state.connected) {
+    await refreshPaths();
+  }
+  document.getElementById('workflow-course')?.focus();
+}
+
 function closeTestMenu(focus = false): void {
   testMenuOpen = false;
   document.getElementById('workflow-test-menu')?.setAttribute('hidden', '');
@@ -480,16 +543,36 @@ function closeTestMenu(focus = false): void {
   }
 }
 document.addEventListener('pointerdown', (event) => {
+  if (!(event.target as HTMLElement).closest('.topbar-students')) {
+    closeStudentMenu();
+  }
+  if (!(event.target as HTMLElement).closest('.topbar-course')) {
+    closeCourseMenu();
+  }
   if (!(event.target as HTMLElement).closest('.topbar-test')) {
     closeTestMenu();
   }
 });
 document.addEventListener('focusin', (event) => {
+  if (!(event.target as HTMLElement).closest('.topbar-students')) {
+    closeStudentMenu();
+  }
+  if (!(event.target as HTMLElement).closest('.topbar-course')) {
+    closeCourseMenu();
+  }
   if (!(event.target as HTMLElement).closest('.topbar-test')) {
     closeTestMenu();
   }
 });
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && studentMenuOpen) {
+    event.preventDefault();
+    closeStudentMenu(true);
+  }
+  if (event.key === 'Escape' && courseMenuOpen) {
+    event.preventDefault();
+    closeCourseMenu(true);
+  }
   if (event.key === 'Escape' && testMenuOpen) {
     event.preventDefault();
     closeTestMenu(true);
@@ -502,6 +585,66 @@ app.addEventListener('click', (event) => {
     return;
   }
   try {
+    if (target.dataset.sliceFileId !== undefined) {
+      if (state.busy || state.uploadStarted || state.pages.length) {
+        return;
+      }
+      const file = correctedPdfs.find((item) => item.id === target.dataset.sliceFileId);
+      if (!file) {
+        return;
+      }
+      clearScan();
+      state.localFile = undefined;
+      state.source = file;
+      render();
+      document.getElementById(target.id)?.focus();
+      return;
+    }
+
+    if (target.dataset.studentListId !== undefined) {
+      if (pathsLocked() || !state.connected) {
+        return;
+      }
+      const file = paths.recentStudentLists?.find(
+        (item) => item.id === target.dataset.studentListId,
+      );
+      if (file) {
+        selectStudentList(file);
+      }
+      return;
+    }
+    if (target.id === 'student-list-pick') {
+      if (pathsLocked() || !state.connected) {
+        return;
+      }
+      closeStudentMenu();
+      globalPicker = 'csv';
+      state.busy = 'picker';
+      render();
+      drive.openPicker('csv');
+      return;
+    }
+    if (target.dataset.courseId !== undefined) {
+      if (pathsLocked() || !state.connected) {
+        return;
+      }
+      const course = paths.recentCourses?.find((item) => item.id === target.dataset.courseId);
+      if (course) {
+        void selectCourse(course);
+      }
+      return;
+    }
+    if (target.id === 'course-pick') {
+      if (pathsLocked() || !state.connected) {
+        return;
+      }
+      closeCourseMenu();
+      globalPicker = 'course';
+      state.busy = 'picker';
+      render();
+      drive.openPicker('folder');
+      return;
+    }
     if (target.dataset.testId !== undefined) {
       if (pathsLocked()) {
         return;
@@ -528,12 +671,42 @@ app.addEventListener('click', (event) => {
         return;
       }
       if (target.id === 'workflow-test') {
+        closeStudentMenu();
+        closeCourseMenu();
         testMenuOpen = !testMenuOpen;
         render();
         if (testMenuOpen) {
           document
             .querySelector<HTMLElement>(
               '#workflow-test-menu [aria-pressed="true"], #workflow-test-menu button:not(:disabled)',
+            )
+            ?.focus();
+        }
+        return;
+      }
+      if (target.id === 'workflow-course') {
+        closeStudentMenu();
+        closeTestMenu();
+        courseMenuOpen = !courseMenuOpen;
+        render();
+        if (courseMenuOpen) {
+          document
+            .querySelector<HTMLElement>(
+              '#workflow-course-menu [aria-pressed="true"], #workflow-course-menu button:not(:disabled)',
+            )
+            ?.focus();
+        }
+        return;
+      }
+      if (target.id === 'workflow-csv') {
+        closeCourseMenu();
+        closeTestMenu();
+        studentMenuOpen = !studentMenuOpen;
+        render();
+        if (studentMenuOpen) {
+          document
+            .querySelector<HTMLElement>(
+              '#workflow-student-menu [aria-pressed="true"], #workflow-student-menu button:not(:disabled)',
             )
             ?.focus();
         }
@@ -876,16 +1049,6 @@ app.addEventListener('change', (event) => {
     preparation.change(input.id, input.value);
     return;
   }
-  if (input.id === 'slice-file') {
-    if (state.busy || state.uploadStarted || state.pages.length) {
-      return;
-    }
-    clearScan();
-    state.localFile = undefined;
-    state.source = correctedPdfs.find((file) => file.id === input.value);
-    render();
-    return;
-  }
   if (input.name === 'draft-mode' && input.checked && !state.busy) {
     drafts.changeMode(input.value);
     return;
@@ -987,6 +1150,8 @@ function initializeGoogle(): void {
         }
         if (!state.connected) {
           testMenuOpen = false;
+          courseMenuOpen = false;
+          studentMenuOpen = false;
         }
         if (connecting && connected && !state.connected) {
           state.error =
@@ -1013,23 +1178,11 @@ function initializeGoogle(): void {
         if (globalPicker) {
           const key = globalPicker;
           globalPicker = undefined;
-          paths[key] = item;
           if (key === 'course') {
-            checkedCourse = undefined;
-            courseSubjects.delete(item.id);
-            paths.test = undefined;
-            tests = [];
-            folders = {};
-            correctedPdfs = [];
-            clearScan();
-            state.localFile = undefined;
-            state.source = undefined;
+            void selectCourse(item);
+            return;
           }
-          applyPaths();
-          render();
-          if (key === 'course' && state.connected) {
-            void refreshPaths();
-          }
+          selectStudentList(item);
           return;
         }
         if (pickerTask === 'preparation') {

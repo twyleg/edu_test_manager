@@ -1708,15 +1708,21 @@ body:has(.progress-island) {
   }
 }
 
+.topbar-course,
+.topbar-students,
 .topbar-test {
   position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
 }
+.topbar-course > .topbar-input,
+.topbar-students > .topbar-input,
 .topbar-test > .topbar-input {
   width: 100%;
 }
+.topbar-course > .topbar-input[aria-expanded='true'],
+.topbar-students > .topbar-input[aria-expanded='true'],
 .topbar-test > .topbar-input[aria-expanded='true'] {
   border-color: var(--green);
   background: #f3f7f4;
@@ -1734,6 +1740,10 @@ body:has(.progress-island) {
   box-shadow: 0 12px 36px #183b2926;
   overflow: hidden;
   text-align: left;
+}
+.course-menu {
+  left: 0;
+  right: auto;
 }
 .test-menu-heading {
   display: flex;
@@ -1896,13 +1906,13 @@ body:has(.progress-island) {
   flex-shrink: 0;
 }
 .slice-file-list {
-  background-image: none;
-  padding: 6px;
-  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
 }
-.slice-file-list option {
-  padding: 8px;
-  border-radius: 4px;
+.slice-file-list .test-menu-choice:disabled {
+  opacity: 0.6;
 }
 @media (max-width: 600px) {
   .slice-folders {

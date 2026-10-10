@@ -8,6 +8,10 @@ Built with Vite, TypeScript and Bootstrap, following [playground_googledrive_fil
 
 Select the **Course directory** and **Student list file** in the topbar. Choose a scan PDF within **Import scans**. With remembering enabled in Privacy & storage settings, these selections are restored on the next visit. The student CSV picker also opens in the last student-list directory.
 
+The **Course** menu lists up to ten recently selected courses, with the active course marked. Choose a recent course to switch directly, or use **Pick course from Google Drive** at the bottom to browse for another folder. Switching courses clears the current test and loads the new course’s tests. Recent courses are remembered across visits only when folder remembering is enabled.
+
+The **Students** menu works the same way for up to ten recent student CSV files. **Pick student list from Google Drive** opens the CSV picker in the remembered student-list folder. Choosing a list updates the shared student input without changing the course or test. This history also follows the folder-remembering preference.
+
 Choose **Current test** to resume a test inside the course's LZKs or Klausuren folders. Use **Create a new test** in that menu to enter a topic and type; the new test is selected automatically. Slice exams lists PDFs from its `02_Korrigiert` folder and selects `03_Split` as the destination. Match students uses `03_Split` and the shared CSV. Prepare emails offers **Preview drafts** from `04_Previews` or **Final drafts** from `03_Split`, using the same CSV; recipient review, email templates, and Gmail authorization remain available.
 
 Click **Connect Google** in the header before using the tasks. It requests Drive, Gmail draft and Gmail label permissions together. Task tabs and workflow selections stay disabled until all permissions are granted; the connection control sits before the three selections. Refresh tests after adding corrected PDFs in Drive. Shared selections are locked during active operations and incomplete jobs so retry destinations stay stable.
@@ -119,7 +123,7 @@ For example, Informatik / LZK / 8a / Zahlen Konvertieren Dezimal Dual on 2026-10
 
 The original PDF stays unchanged in the scanner input folder. Filename format is `YYYYMMDD_{KA|LZK}-{PH|IF}{class}-{topic}.pdf`. Ambiguous required folder names and existing destination filenames are rejected. If creation or import fails, keep the dialog or tab open and retry; stable folder and copy IDs allow the same job to resume. Inputs stay locked during incomplete jobs. Reloading loses retry tracking; inspect Drive before starting again. Create only one test at a time per course/type across tabs or devices, since Drive does not reserve numbering atomically.
 
-After grading, save the combined corrected PDF to `02_Korrigiert`. **Slice exams** lists these PDFs and defaults to `03_Split` for output.
+After grading, save the combined corrected PDF to `02_Korrigiert`. **Slice exams** shows these PDFs in an always-visible list, using the same row style as the Course and Students menus, and defaults to `03_Split` for output. Click a file to select it; the selected row is highlighted with a checkmark.
 
 ## Slice exams workflow
 
