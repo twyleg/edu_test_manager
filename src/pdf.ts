@@ -185,6 +185,10 @@ export async function createExamPreviewPdf(bytes: Uint8Array, signal: AbortSigna
 
 /** Name field: right half of the first page, top quarter. */
 export async function renderNameCrop(bytes: Uint8Array, signal: AbortSignal): Promise<string> {
+  return URL.createObjectURL(await renderNameCropBlob(bytes, signal));
+}
+
+export async function renderNameCropBlob(bytes: Uint8Array, signal: AbortSignal): Promise<Blob> {
   signal.throwIfAborted();
   const loading = getDocument({ data: bytes.slice() });
   const abort = () => { void loading.destroy(); };
@@ -201,7 +205,7 @@ export async function renderNameCrop(bytes: Uint8Array, signal: AbortSignal): Pr
     await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport, transform: [1, 0, 0, 1, -viewport.width * .5, 0] }).promise;
     const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Could not render the name area.')), 'image/png'));
     signal.throwIfAborted();
-    return URL.createObjectURL(blob);
+    return blob;
   } finally {
     canvas.width = canvas.height = 0;
     signal.removeEventListener('abort', abort);

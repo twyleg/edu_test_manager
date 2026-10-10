@@ -2,11 +2,13 @@ import { getGoogleConfigError, hasGoogleConfig } from './config';
 import type { DriveItem, ExamFile, PageScan } from './types';
 
 export interface AppState {
-  task: 'preparation' | 'slice' | 'match' | 'drafts' | 'send';
+  task: 'preparation' | 'slice' | 'match' | 'documentation' | 'drafts' | 'send';
   expanded: Record<'setup' | 'review' | 'save', boolean>;
   ready: boolean;
   connected: boolean;
-  busy: '' | 'picker' | 'scan' | 'split' | 'upload' | 'folder' | 'match' | 'drafts' | 'send' | 'preparation';
+  localOnly?: boolean;
+  hasConnected?: boolean;
+  busy: '' | 'connect' | 'picker' | 'scan' | 'split' | 'upload' | 'folder' | 'match' | 'documentation' | 'drafts' | 'send' | 'preparation';
   source?: DriveItem;
   correctedPdfs?: DriveItem[];
   inputFolder?: DriveItem;
@@ -37,7 +39,7 @@ const icon = (kind: 'file' | 'folder' | 'cut' | 'zoom') => {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind]}</svg>`;
 };
 
-export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '', sendPanel = '', preparationPanel = '', workflowPanel = '', workflowInputs = ''): string {
+export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '', sendPanel = '', preparationPanel = '', workflowPanel = '', workflowInputs = '', documentationPanel = ''): string {
   const { busy, pages, files } = state;
   const processing = busy === 'scan' || busy === 'split' || busy === 'upload';
   const locked = Boolean(busy || state.uploadStarted);
@@ -63,18 +65,21 @@ export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '',
   return `
     <header class="topbar"><div class="shell topbar-inner">
       <a class="brand" href="./"><span class="brand-mark">${icon('cut')}</span> EDU <span class="brand-light">Test Manager</span></a>
-      ${workflowInputs}
-      <div class="connection"><span class="connection-label"><i class="status-dot ${state.connected ? 'online' : ''}"></i>${state.connected ? 'Drive connected' : 'Drive not connected'}</span>
-        <button id="connect" class="btn btn-sm btn-outline-secondary" ${disabled(Boolean(busy) || googleDisabled)}>${state.connected ? 'Disconnect' : 'Connect Google Drive'}</button>
+      <div class="connection"><span class="connection-label"><i class="status-dot ${state.connected ? 'online' : ''}"></i>${state.connected ? 'Google connected' : 'Google not connected'}</span>
+        <button id="connect" class="btn btn-sm ${state.connected ? 'btn-outline-secondary' : 'btn-primary'}" ${disabled(Boolean(busy) || googleDisabled)}>${busy === 'connect' ? 'Connecting…' : state.connected ? 'Disconnect' : 'Connect Google'}</button>
       </div>
+      ${workflowInputs}
     </div></header>
     <main class="shell">
       ${workflowPanel}
       <nav class="task-tabs" role="tablist" aria-label="Tasks">
-        ${(['preparation', 'slice', 'match', 'drafts', 'send'] as const).map((task, index) => `<button id="task-${task}" role="tab" aria-selected="${state.task === task}" aria-controls="panel-${task}" tabindex="${state.task === task ? 0 : -1}" data-task="${task}" ${disabled(Boolean(busy))}>${['Import scans', 'Slice exams', 'Match students', 'Prepare drafts', 'Batch send'][index]}</button>`).join('')}
+        ${(['preparation', 'slice', 'match', 'documentation', 'drafts', 'send'] as const).map((task, index) => `<button id="task-${task}" role="tab" aria-selected="${state.task === task}" aria-controls="panel-${task}" tabindex="${state.task === task ? 0 : -1}" data-task="${task}" ${disabled(Boolean(busy) || !state.connected)}>${['Import scans', 'Slice exams', 'Match students', 'Create documentation', 'Prepare emails', 'Batch send'][index]}</button>`).join('')}
       </nav>
       <div id="error" role="alert" ${state.error ? '' : 'hidden'} class="alert alert-danger">${escapeHtml(state.error)}</div>
+      ${!state.connected && !state.localOnly ? '<section class="workspace-panel connection-start"><h1>Connect to start</h1><p>Use Connect Google in the header to enable tasks and choose your course, student list, and test.</p></section>' : ''}
+      <div ${!state.connected && !state.localOnly && !state.hasConnected ? 'hidden' : ''}>
       ${state.task === 'match' ? matchingPanel : ''}
+      ${state.task === 'documentation' ? documentationPanel : ''}
       ${state.task === 'drafts' ? draftsPanel : ''}
       ${state.task === 'send' ? sendPanel : ''}
       ${state.task === 'preparation' ? preparationPanel : ''}
@@ -86,7 +91,7 @@ export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '',
         ${state.workflowTest ? `<div class="slice-folders">
           <div class="slice-source">
             <div class="slice-folder-heading"><div><span class="form-label">Input directory</span><strong>${escapeHtml(state.inputFolder?.name || '02_Korrigiert not found')}</strong></div><button id="choose-slice-input" class="btn btn-sm btn-outline-secondary" aria-label="Change input folder" ${disabled(locked || googleDisabled)}>Change</button></div>
-            <label for="slice-file" class="visually-hidden">Exam PDF</label><select id="slice-file" class="form-select slice-file-list" size="5" ${disabled(locked || pages.length > 0 || !state.correctedPdfs?.length)}><option value="" ${!state.source ? 'selected' : ''}>${state.correctedPdfs?.length ? 'Choose a corrected PDF' : 'No PDFs available in this folder'}</option>${(state.correctedPdfs || []).map(file => `<option value="${escapeHtml(file.id)}" ${state.source?.id === file.id ? 'selected' : ''}>${escapeHtml(file.name)}</option>`).join('')}</select>
+            <label for="slice-file" class="visually-hidden">Exam PDF</label><select id="slice-file" class="form-select slice-file-list" size="5" ${disabled(locked || pages.length > 0 || !state.correctedPdfs?.length)}>${state.correctedPdfs?.length ? '' : '<option value="">No PDFs available in this folder</option>'}${(state.correctedPdfs || []).map(file => `<option value="${escapeHtml(file.id)}" ${state.source?.id === file.id ? 'selected' : ''}>${escapeHtml(file.name)}</option>`).join('')}</select>
           </div>
           <div class="slice-destination"><div class="slice-folder-heading"><div><span class="form-label">Output directory</span><strong>${escapeHtml(state.folder?.name || '03_Split not found')}</strong></div><button id="choose-folder" class="btn btn-sm btn-outline-secondary" aria-label="Change output folder" ${disabled(locked || googleDisabled)}>Change</button></div></div>
         </div>` : `        <div class="selection-grid">
@@ -154,6 +159,7 @@ export function renderApp(state: AppState, matchingPanel = '', draftsPanel = '',
         <button id="upload" class="btn btn-primary" ${disabled(Boolean(busy) || !state.folder || allUploaded || !state.connected)}>${busy === 'upload' ? 'Saving to Drive…' : allUploaded ? 'All files saved' : state.uploadStarted ? 'Retry remaining uploads' : `Save ${files.length} PDFs to Drive`}</button></div>
       </section>` : ''}
       </div></section>
+      </div>
       </div>
       <footer class="site-footer"><span>EDU Test Manager.</span></footer>
     </main>`;

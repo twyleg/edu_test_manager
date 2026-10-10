@@ -41,14 +41,13 @@ test('matches a Drive folder using CSV and renames in place, recovering a lost r
     throw new Error(`Unexpected URL: ${url.pathname}`);
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   // The slicing folder is prefilled in matching, without needing to scan.
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose Drive folder', exact: true }).click();
   await expect(page.locator('#panel-slice .file-selection').nth(1)).toContainText('Physics class');
   await page.getByRole('tab', { name: 'Match students', exact: true }).click();
   await expect(page.locator('#match-setup-body')).toContainText('Physics class');
-  await page.getByRole('button', { name: 'Enable folder access', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Enable folder access', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Choose student CSV', exact: true }).click();
   await expect(page.locator('#match-setup-body')).toContainText('students.csv');
   await expect(page.locator('#match-files')).toHaveAttribute('aria-expanded', 'false');
@@ -133,12 +132,12 @@ test('matching starts independently and reports invalid CSV and empty folders', 
     throw new Error('Unexpected request');
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Match students', exact: true }).click();
   await page.getByRole('button', { name: 'Choose exam folder' }).click();
   await expect(page.locator('#match-setup-body')).toContainText('Physics class');
   await page.getByRole('button', { name: 'Choose student CSV' }).click();
   await expect(page.locator('#match-setup-body')).toContainText('students.csv');
-  await page.getByRole('button', { name: 'Enable folder access' }).click();
   await page.locator('#match-load').click();
   await expect(page.getByRole('alert')).toContainText('CSV needs the columns');
   validCsv = true;
@@ -170,12 +169,12 @@ test('cancelling preloading releases cached previews and keeps matching closed',
     return route.fulfill({ body: bytes, contentType: 'application/pdf' });
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Match students', exact: true }).click();
   await page.locator('#match-folder').click();
   await expect(page.locator('#match-setup-body')).toContainText('Physics class');
   await page.locator('#match-csv').click();
   await expect(page.locator('#match-setup-body')).toContainText('students.csv');
-  await page.locator('#match-access').click();
   await page.locator('#match-load').click();
   await page.locator('#match-preload').click();
   await expect.poll(() => secondRequested).toBe(true);

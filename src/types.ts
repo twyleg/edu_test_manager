@@ -2,6 +2,7 @@ export interface DriveItem {
   id: string;
   name: string;
   mimeType: string;
+  md5Checksum?: string;
 }
 
 export interface PageScan {

@@ -32,31 +32,17 @@ export class GoogleDrive {
   get draftsAccess(): boolean { return this.connected && Boolean(this.token?.scope?.split(' ').includes(draftsScope)); }
 
   get gmailLabelsAccess(): boolean { return this.connected && Boolean(this.token?.scope?.split(' ').includes(gmailModifyScope)); }
+  get workflowAccess(): boolean { return this.matchingAccess && this.draftsAccess && this.gmailLabelsAccess; }
 
   async gmailLabelRequest(path: 'labels' | `messages/${string}/modify` | `threads/${string}/modify`, init: RequestInit = {}): Promise<Response> {
-    if (!this.gmailLabelsAccess) throw new GoogleHttpError('Enable Gmail labels, then retry.', 401);
+    if (!this.gmailLabelsAccess) throw new GoogleHttpError('Connect Google in the header to grant Gmail label access, then retry.', 401);
     return this.request(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, init);
-  }
-
-  connectDrafts(withLabels = false): void {
-    if (!this.client) throw new Error('Google sign-in is not ready.');
-    this.client.requestAccessToken({ scope: `${driveScope} ${matchingScope} ${draftsScope}${withLabels ? ` ${gmailModifyScope}` : ''}`, prompt: 'consent' });
-  }
-
-  connectSending(): void {
-    if (!this.client) throw new Error('Google sign-in is not ready.');
-    this.client.requestAccessToken({ scope: draftsScope, prompt: 'consent' });
   }
 
   /** Gmail draft operations, including explicit sending from Batch send. */
   async gmailRequest(path: 'profile' | 'drafts' | `drafts?${string}` | `drafts/${string}`, init: RequestInit = {}): Promise<Response> {
-    if (!this.draftsAccess) throw new GoogleHttpError('Enable Gmail drafts access, then retry.', 401);
+    if (!this.draftsAccess) throw new GoogleHttpError('Connect Google in the header to grant Gmail draft access, then retry.', 401);
     return this.request(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, init);
-  }
-
-  connectMatching(): void {
-    if (!this.client) throw new Error('Google sign-in is not ready.');
-    this.client.requestAccessToken({ scope: `${driveScope} ${matchingScope}`, prompt: 'consent' });
   }
 
   async initialize(callbacks: Callbacks): Promise<void> {
@@ -71,7 +57,7 @@ export class GoogleDrive {
       timeout: 15000, ontimeout: () => reject(new Error('Google Picker timed out. Reload to retry.')),
     }));
     this.client = window.google.accounts.oauth2.initTokenClient({
-      client_id: googleConfig.clientId!, scope: driveScope,
+      client_id: googleConfig.clientId!, scope: `${driveScope} ${matchingScope} ${draftsScope} ${gmailModifyScope}`,
       callback: response => {
         if (response.error || !response.access_token) {
           this.pendingPicker = undefined;
@@ -105,7 +91,7 @@ export class GoogleDrive {
 
   connect(): void {
     if (!this.client) throw new Error('Google sign-in is not ready. Check configuration and reload.');
-    this.client.requestAccessToken({ prompt: this.connected ? '' : 'consent' });
+    this.client.requestAccessToken({ prompt: this.workflowAccess ? '' : 'consent' });
   }
 
   forgetSession(): void {
@@ -311,7 +297,7 @@ export class GoogleDrive {
     do {
       const escaped = folderId.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const params = new URLSearchParams({ q: `'${escaped}' in parents and trashed = false${mimeType ? ` and mimeType = '${mimeType}'` : ''}`,
-        fields: 'nextPageToken,incompleteSearch,files(id,name,mimeType)', pageSize: '1000', orderBy: 'name_natural',
+        fields: 'nextPageToken,incompleteSearch,files(id,name,mimeType,md5Checksum)', pageSize: '1000', orderBy: 'name_natural',
         supportsAllDrives: 'true', includeItemsFromAllDrives: 'true', ...(pageToken ? { pageToken } : {}) });
       const response = await this.request(`https://www.googleapis.com/drive/v3/files?${params}`, { signal });
       const data = await response.json() as { files?: DriveItem[]; nextPageToken?: string; incompleteSearch?: boolean };
@@ -328,7 +314,7 @@ export class GoogleDrive {
     if (existing.ok) {
       const copy = await existing.json() as DriveItem & { parents?: string[]; trashed?: boolean };
       if (copy.trashed || copy.mimeType !== pdfMimeType || copy.name !== name || !copy.parents?.includes(destinationFolderId)) {
-        throw new Error('The prepared scan copy was changed or moved. Restore it in 01_Scans before retrying.');
+        throw new Error('The prepared scan copy was changed or moved. Restore it in the selected destination folder before retrying.');
       }
       return copy;
     }
@@ -413,6 +399,31 @@ export class GoogleDrive {
     await this.request(location, { method: 'PUT', headers: { 'Content-Type': pdfMimeType }, body: blob });
   }
 
+  async readTextFile(item: DriveItem, signal?: AbortSignal): Promise<string> {
+    const response = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(item.id)}?alt=media&supportsAllDrives=true`, { signal });
+    return response.text();
+  }
+
+  async saveJsonFile(id: string, name: string, folderId: string, content: string): Promise<DriveItem> {
+    const existing = await this.request(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?fields=id,name,mimeType,parents,trashed&supportsAllDrives=true`, {}, [404]);
+    const params = 'supportsAllDrives=true&fields=id,name,mimeType';
+    if (existing.ok) {
+      const item = await existing.json() as DriveItem & { parents?: string[]; trashed?: boolean };
+      if (item.trashed || item.mimeType === folderMimeType || item.name !== name || !item.parents?.includes(folderId)) throw new Error('The results file was moved, renamed, or deleted. Restore it in the course directory before retrying.');
+      const response = await this.request(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&${params}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json; charset=UTF-8' }, body: content,
+      });
+      return await response.json() as DriveItem;
+    }
+    const boundary = `edu-results-${crypto.randomUUID()}`;
+    const metadata = JSON.stringify({ id, name, mimeType: 'application/json', parents: [folderId] });
+    const body = new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${content}\r\n--${boundary}--\r\n`]);
+    const response = await this.request(`https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&${params}`, {
+      method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body,
+    });
+    return await response.json() as DriveItem;
+  }
+
   private clearToken(): void {
     this.token = null;
     try { sessionStorage.removeItem(tokenStorageKey); } catch { /* Storage may be disabled. */ }
@@ -423,7 +434,7 @@ export class GoogleDrive {
     const service = url.startsWith('https://gmail.googleapis.com/') ? 'Gmail' : 'Google Drive';
     if (!this.connected) {
       this.clearToken();
-      throw new GoogleHttpError('Your Google session expired. Connect Google Drive again, then retry.', 401);
+      throw new GoogleHttpError('Your Google session expired. Connect Google in the header again, then retry.', 401);
     }
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${this.token!.accessToken}`);
@@ -436,7 +447,7 @@ export class GoogleDrive {
     if (response.ok || allowedStatuses.includes(response.status)) return response;
     if (response.status === 401) {
       this.clearToken();
-      throw new GoogleHttpError('Your Google session expired. Connect Google Drive again, then retry.', 401);
+      throw new GoogleHttpError('Your Google session expired. Connect Google in the header again, then retry.', 401);
     }
     const detail = await response.json().catch(() => null) as { error?: { message?: string } } | null;
     throw new GoogleHttpError(`${service} (${response.status}): ${detail?.error?.message || response.statusText || 'Request failed. Please retry.'}`, response.status);

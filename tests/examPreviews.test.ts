@@ -128,4 +128,35 @@ describe('exam preview exports', () => {
     expect(() => new ExamPreviewExport(folder, [exams[0], { ...exams[1], name: exams[0].name }])).toThrow('same preview filename');
     expect(() => new ExamPreviewExport(folder, [])).toThrow('at least one');
   });
+  it('uses a selected output folder and keeps it fixed across retries', async () => {
+    const { api, drive, create } = mockDrive();
+    const destination = { id: 'custom-output', name: 'Custom previews', mimeType: folderMimeType };
+    const saved = new Map<string, DriveItem>();
+    api.listFolderPdfs.mockImplementation(async id => id === folder.id ? exams : [...saved.values()]);
+    let fail = true;
+    api.uploadPdf.mockImplementation(async (id, name, folderId) => {
+      expect(folderId).toBe('custom-output');
+      if (name.startsWith('02_') && fail) { fail = false; throw new Error('Upload failed'); }
+      saved.set(id, { id, name, mimeType: pdfMimeType });
+    });
+    const job = new ExamPreviewExport(folder, exams, destination);
+    destination.id = 'changed-after-start';
+    await expect(job.run(drive, create, vi.fn())).rejects.toThrow('Upload failed');
+    const progress = vi.fn();
+    await job.run(drive, create, progress);
+    expect(job.complete).toBe(true);
+    expect(api.getParentFolder).not.toHaveBeenCalled();
+    expect(api.createFolder).not.toHaveBeenCalled();
+    expect(api.uploadPdf.mock.calls.map(args => args[0])).toEqual(['id-1', 'id-2', 'id-2']);
+    expect(progress).toHaveBeenLastCalledWith('All 2 exam previews are available in Custom previews.', 2, 2);
+  });
+  it('creates missing previews in the current test when the exam input is overridden', async () => {
+    const { api, drive, create } = mockDrive();
+    await new ExamPreviewExport(folder, exams, undefined, parent).run(drive, create, vi.fn());
+    expect(api.getParentFolder).not.toHaveBeenCalled();
+    expect(api.createFolder).toHaveBeenCalledWith('id-1', '04_Previews', parent.id);
+  });
+  it('rejects the exam folder as the preview output', () => {
+    expect(() => new ExamPreviewExport(folder, exams, folder)).toThrow('different folders');
+  });
 });

@@ -21,6 +21,7 @@ test('floating progress follows a streamed Drive download and then scanning', as
     };
   }, { length: bytes.length });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
   await expect(page.locator('#panel-slice .file-selection').first()).toContainText('Drive exam.pdf');
@@ -68,6 +69,7 @@ test('unknown download size shows activity and received bytes, and can be cancel
     };
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
   await expect(page.locator('#panel-slice .file-selection').first()).toContainText('Drive exam.pdf');

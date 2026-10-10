@@ -5,7 +5,9 @@ import { mockGoogleUi } from './googleMock';
 const folderMimeType = 'application/vnd.google-apps.folder';
 const pdfMimeType = 'application/pdf';
 
-for (const existingFolder of [true, false]) test(`exports matched exam previews and resumes uploads; existing folder=${existingFolder}`, async ({ page }) => {
+for (const mode of ['existing', 'missing', 'custom'] as const) test(`exports matched exam previews and resumes uploads; destination=${mode}`, async ({ page }) => {
+  const existingFolder = mode === 'existing';
+  const customOutput = mode === 'custom';
   await mockGoogleUi(page);
   await page.addInitScript(() => Object.assign(window, { __mockFolderSelections: [{ id: 'split', name: '03_Split' }] }));
   const source = await PDFDocument.create();
@@ -21,6 +23,7 @@ for (const existingFolder of [true, false]) test(`exports matched exam previews 
     ['excluded', { id: 'excluded', name: 'unselected.pdf', mimeType: pdfMimeType, parents: ['split'] }],
   ]);
   if (existingFolder) files.set('previews', { id: 'previews', name: '04_Previews', mimeType: folderMimeType, parents: ['test-folder'] });
+  if (customOutput) files.set('custom-previews', { id: 'custom-previews', name: 'Paper corrections previews', mimeType: folderMimeType, parents: ['other-folder'] });
   const uploaded = new Map<string, Buffer>();
   const sessions = new Map<string, Item>();
   const downloads: string[] = [];
@@ -62,32 +65,42 @@ for (const existingFolder of [true, false]) test(`exports matched exam previews 
     return route.fulfill({ json: { ...item, size: String(bytes.length), capabilities: { canAddChildren: true } } });
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Match students', exact: true }).click();
   await expect(page.locator('#match-previews')).toBeDisabled();
   await page.locator('#match-folder').click();
   await expect(page.locator('#match-setup-body')).toContainText('03_Split');
   await page.locator('#match-csv').click();
   await expect(page.locator('#match-setup-body')).toContainText('students.csv');
-  await page.locator('#match-access').click();
   await page.locator('#match-load').click();
   await page.locator('[data-match-file="excluded"]').uncheck();
   await page.locator('#match-preload').click();
   await expect(page.getByRole('status')).toContainText('Matching complete');
   await expect(page.locator('#match-previews')).toHaveAttribute('aria-expanded', 'true');
+  if (customOutput) {
+    await page.evaluate(() => Object.assign(window, { __mockFolderSelections: [{ id: 'custom-previews', name: 'Paper corrections previews' }] }));
+    await page.getByRole('button', { name: 'Change output folder' }).click();
+    await expect(page.locator('#match-previews-body')).toContainText('Paper corrections previews');
+    await expect(page.locator('#match-previews')).toHaveAttribute('aria-expanded', 'true');
+  }
   await page.getByRole('button', { name: 'Create previews', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('Temporary preview upload failure');
   await expect(page.getByRole('status')).toContainText('1 of 2 previews saved');
   expect(uploaded.size).toBe(1);
+  await expect(page.locator('#match-output')).toBeDisabled();
+  await expect(page.locator('#match-folder')).toBeDisabled();
   await page.getByRole('button', { name: 'Retry remaining previews', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('All 2 exam previews are available in 04_Previews.');
+  const outputName = customOutput ? 'Paper corrections previews' : '04_Previews';
+  await expect(page.getByRole('status')).toHaveText(`All 2 exam previews are available in ${outputName}.`);
   await expect(page.locator('#match-previews')).toHaveAttribute('aria-expanded', 'false');
   expect(uploaded.size).toBe(2);
   expect(uploadIds).toHaveLength(3);
   expect(uploadIds[1]).toBe(uploadIds[2]);
   expect(downloads).toEqual(['anna', 'lukas']);
-  const destination = [...files.values()].filter(item => item.name === '04_Previews');
+  const destination = [...files.values()].filter(item => item.name === outputName);
   expect(destination).toHaveLength(1);
-  expect(destination[0].parents).toEqual(['test-folder']);
+  expect(destination[0].parents).toEqual([customOutput ? 'other-folder' : 'test-folder']);
+  if (customOutput) expect([...files.values()].some(item => item.name === '04_Previews')).toBe(false);
   for (const [id, bytes] of uploaded) {
     const item = files.get(id)!;
     expect(item.parents).toEqual([destination[0].id]);
@@ -99,7 +112,7 @@ for (const existingFolder of [true, false]) test(`exports matched exam previews 
   await page.locator('#match-previews').click();
   await expect(page.getByRole('button', { name: 'All previews saved', exact: true })).toBeDisabled();
   await expect(page.locator('#match-previews-body .saved-link')).toHaveCount(2);
-  await page.screenshot({ path: `test-results/matching-previews-${existingFolder}.png`, fullPage: true });
+  await page.screenshot({ path: `test-results/matching-previews-${mode}.png`, fullPage: true });
   // A fresh matching batch recognizes existing filenames and leaves all saved previews intact.
   await page.locator('#match-setup').click();
   await page.locator('#match-load').click();
@@ -107,7 +120,7 @@ for (const existingFolder of [true, false]) test(`exports matched exam previews 
   await page.locator('#match-preload').click();
   await expect(page.getByRole('status')).toContainText('Matching complete');
   await page.getByRole('button', { name: 'Create previews', exact: true }).click();
-  await expect(page.getByRole('status')).toHaveText('All 2 exam previews are available in 04_Previews.');
+  await expect(page.getByRole('status')).toHaveText(`All 2 exam previews are available in ${outputName}.`);
   expect(uploadIds).toHaveLength(3);
   expect(uploaded.size).toBe(2);
 });
@@ -115,6 +128,7 @@ for (const existingFolder of [true, false]) test(`exports matched exam previews 
 test('preview PDFs contain only the visible top 20%, including rotated and cropped front pages', async ({ page }) => {
   await mockGoogleUi(page);
   await page.goto('/');
+  await page.locator('#connect').click();
   for (const rotation of [0, 90, 180, 270, -90]) {
     const source = await PDFDocument.create();
     const first = source.addPage([600, 800]);

@@ -1,5 +1,6 @@
 const preferenceKey = 'edu-test-manager-privacy-v1';
 export const studentFolderStorageKey = 'edu-test-manager-student-list-folder';
+export const documentationHighlightsStorageKey = 'edu-test-manager-documentation-highlights-v1';
 const lifetime = 180 * 24 * 60 * 60 * 1000;
 interface Preferences { google: boolean; rememberFolder: boolean; expires: number }
 let preferences: Preferences | undefined;
@@ -8,6 +9,7 @@ try {
   if (saved && typeof saved.google === 'boolean' && typeof saved.rememberFolder === 'boolean' && saved.expires > Date.now() && saved.expires <= Date.now() + lifetime) preferences = saved;
 } catch { /* Consent can also be kept in memory when browser storage is unavailable. */ }
 export const googleAllowed = () => Boolean(preferences?.google);
+export const localOnly = () => preferences?.google === false;
 export const rememberStudentFolder = () => Boolean(preferences?.google && preferences.rememberFolder);
 
 export function mountPrivacy(onChange: (google: boolean, previouslyAllowed: boolean) => void, isBusy: () => boolean): void {
@@ -20,7 +22,7 @@ export function mountPrivacy(onChange: (google: boolean, previouslyAllowed: bool
       <section class="privacy-panel shell" aria-labelledby="privacy-title" ${expanded ? '' : 'hidden'}>
       <h2 id="privacy-title">Google services & browser storage</h2>
       <p>Local PDF processing works without Google. Enabling Google loads its sign-in and file picker services, which receive connection information such as your IP address and may use cookies. Google authorization is requested separately.</p>
-      <p>Remembering the student-list folder is the default option: the student-list folder ID and shared workflow selections (Drive IDs and names) are saved on this browser. You can instead enable Google without remembering folders. No analytics or advertising is added by this app; fonts are hosted locally.</p>
+      <p>Remembering the student-list folder is the default option: the student-list folder ID, shared workflow selections (Drive IDs and names) and documentation highlight areas are saved on this browser. You can instead enable Google without remembering folders. No analytics or advertising is added by this app; fonts are hosted locally.</p>
       <p>Your choice is saved for 180 days. A Google access token is kept in session storage after sign-in. Change your choice here at any time. ${googleAllowed() ? 'Switching to local only clears the app token and remembered folder and reloads the page; finish or save your current work first.' : ''}</p>
       <div class="privacy-actions"><button id="privacy-remember" class="btn btn-outline-primary">Enable Google & remember folder</button><button id="privacy-google" class="btn btn-outline-primary">Enable Google without remembering</button><button id="privacy-local" class="btn btn-outline-primary">Use local only${googleAllowed() ? ' (reload)' : ''}</button></div>
       <p id="privacy-feedback" role="status"></p>
@@ -35,7 +37,7 @@ export function mountPrivacy(onChange: (google: boolean, previouslyAllowed: bool
     preferences = { google: id !== 'privacy-local', rememberFolder: id === 'privacy-remember', expires: Date.now() + lifetime };
     try {
       localStorage.setItem(preferenceKey, JSON.stringify(preferences));
-      if (!preferences.rememberFolder) { localStorage.removeItem(studentFolderStorageKey); localStorage.removeItem('edu-test-manager-workflow-v1'); }
+      if (!preferences.rememberFolder) { localStorage.removeItem(studentFolderStorageKey); localStorage.removeItem('edu-test-manager-workflow-v1'); localStorage.removeItem(documentationHighlightsStorageKey); }
     } catch { /* A blocked store must not prevent use of the application. */ }
     if (!preferences.google) { try { sessionStorage.removeItem('edu-test-manager-token'); } catch { /* Storage unavailable. */ } }
     expanded = false; render(); onChange(preferences.google, previous);

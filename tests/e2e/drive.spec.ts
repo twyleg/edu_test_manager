@@ -57,6 +57,7 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
     throw new Error(`Unexpected Drive request: ${request.method()} ${url}`);
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
   await expect(page.locator('#panel-slice .file-selection').first()).toContainText('Drive exam.pdf');
@@ -71,7 +72,7 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
   await expect(page.locator('#choose-folder')).toBeDisabled();
   await expect(page.locator('#rotate-left-0')).toBeDisabled();
   await expect(page.locator('#skip-1')).toBeDisabled();
-  await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect Google', exact: true }).click();
   await page.getByRole('button', { name: 'Retry remaining uploads' }).click();
   await expect(page.locator('#toggle-save')).toHaveAttribute('aria-expanded', 'false');
   await page.locator('#toggle-save').click();

@@ -5,6 +5,7 @@ import { mockGoogleUi } from './googleMock';
 test('independent task tabs preserve a batch and subtasks advance on completion', async ({ page }) => {
   await mockGoogleUi(page);
   await page.goto('/');
+  await page.locator('#connect').click();
   await expect(page.getByRole('tab', { name: 'Import scans', exact: true })).toHaveAttribute('aria-selected', 'true');
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Slice exams' })).toHaveAttribute('aria-selected', 'true');
@@ -12,7 +13,10 @@ test('independent task tabs preserve a batch and subtasks advance on completion'
   await page.getByRole('tab', { name: 'Match students' }).click();
   await expect(page.getByRole('tabpanel')).toContainText('folder of already-sliced exams');
   await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('tab', { name: 'Prepare drafts' })).toBeFocused();
+  await expect(page.getByRole('tab', { name: 'Create documentation' })).toBeFocused();
+  await expect(page.getByRole('tabpanel')).toContainText('Record points');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: 'Prepare emails' })).toBeFocused();
   await expect(page.getByRole('tabpanel')).toContainText('Create a Gmail draft');
   await page.keyboard.press('Home');
   await expect(page.getByRole('tab', { name: 'Import scans', exact: true })).toBeFocused();
@@ -47,6 +51,7 @@ test('active scanning mutes setup and focuses progress; cancellation restores se
   const hold = new Promise<void>(resolve => { release = resolve; });
   await page.route('**/src/qr.worker.ts*', async route => { await hold; await route.continue(); });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   const pdf = await PDFDocument.create();
   for (let i = 0; i < 5; i++) pdf.addPage();

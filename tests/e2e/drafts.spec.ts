@@ -82,15 +82,15 @@ test(`creates drafts with retry protection; shared attachment source=${source}`,
     throw new Error(`Unexpected Gmail operation ${route.request().method()} ${url.pathname}`);
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Match students', exact: true }).click();
   await page.locator('#match-folder').click();
   await expect(page.locator('#match-setup-body')).toContainText('Physics class');
   await page.locator('#match-csv').click();
   await expect(page.locator('#match-setup-body')).toContainText('students.csv');
-  await page.getByRole('tab', { name: 'Prepare drafts', exact: true }).click();
+  await page.getByRole('tab', { name: 'Prepare emails', exact: true }).click();
   await expect(page.locator('#draft-setup-body')).toContainText('Physics class');
   await expect(page.locator('#draft-setup-body')).toContainText('students.csv');
-  await page.locator('#draft-access').click();
   await page.locator('#draft-load').click();
   await expect(page.locator('#draft-compose-body')).toBeVisible();
   await expect(page.locator('#draft-file-2')).toBeDisabled();
@@ -100,7 +100,6 @@ test(`creates drafts with retry protection; shared attachment source=${source}`,
   if (!withExtras) await page.locator('#draft-labels').fill('');
   await page.locator('#draft-body').fill('Hallo {{Vorname}} {{Nachname}},\n\nhier ist deine Arbeit. Viele Grüße!');
   if (withExtras) {
-    await page.locator('#draft-label-access').click();
     await page.locator('#draft-labels').fill('bulk-send, 8A, bulk-send');
     if (source === 'local') await page.locator('#draft-extra').setInputFiles({ name: 'Hinweise.bin', mimeType: 'application/octet-stream', buffer: extra });
     else {

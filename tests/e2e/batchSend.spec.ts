@@ -32,9 +32,9 @@ test('batch send uses the exact label query, paginates and sends only checked dr
     return json({ id, message: { id: `${id}-${changed ? 2 : 1}`, snippet: 'Your exam', payload } });
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Batch send', exact: true }).click();
   await expect(page.getByText('Experimental draft labels', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Enable Gmail access' }).click();
   await page.getByRole('button', { name: 'Load drafts', exact: true }).click();
   await expect(page.locator('#send-row-1')).toBeVisible();
   await expect(page.locator('#send-submit')).toBeDisabled();
@@ -76,9 +76,9 @@ test('empty label search explains Gmail limitation', async ({ page }) => {
   await mockGoogleUi(page);
   await page.route('https://gmail.googleapis.com/**', route => route.fulfill({ json: route.request().url().endsWith('profile') ? { emailAddress: 'teacher@example.org' } : { drafts: [] } }));
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Batch send', exact: true }).click();
   await expect(page.getByText('Experimental draft labels', { exact: true })).toHaveCount(0);
-  await page.locator('#send-access').click();
   await page.locator('#send-load').click();
   await expect(page.getByRole('status')).toContainText('No drafts found');
   await expect(page.locator('#send-submit')).toBeDisabled();

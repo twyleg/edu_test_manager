@@ -17,16 +17,19 @@ test('saved workflow derives folders and switches between preview and final draf
     const files = q.includes("'course'") ? [folder('lzks', 'LZKs'), folder('ka', 'Klausuren')] : q.includes("'lzks'") ? [folder('test', '01_Test')]
       : q.includes("'test'") ? [folder('corrected', '02_Korrigiert'), folder('split', '03_Split'), folder('previews', '04_Previews')]
       : q.includes("'alternate-input'") ? [{ id: 'alternate-pdf', name: 'Another corrected exam.pdf', mimeType: 'application/pdf' }]
+      : q.includes("'matching-input'") ? [{ id: 'matching-pdf', name: 'Individual exam from custom input.pdf', mimeType: 'application/pdf' }]
       : q.includes("'corrected'") ? [{ id: 'pdf', name: 'Corrected exam.pdf', mimeType: 'application/pdf' }] : [];
     await route.fulfill({ json: { files } });
   });
+  await page.route('https://www.googleapis.com/drive/v3/files/students?*', route => route.fulfill({ body: 'Nr.;Nachname;Vorname;E-Mail-Adresse\n1;Müller;Anna;anna@example.org', contentType: 'text/csv' }));
+  await page.route('https://www.googleapis.com/drive/v3/files/course?*', route => route.fulfill({ json: { ...folder('course', '8a'), parents: [] } }));
   await page.goto('/');
+  await page.locator('#connect').click();
   await expect(page.locator('.topbar #workflow-input')).toHaveCount(0);
   await expect(page.locator('#prep-input')).toContainText('Choose PDF from Drive');
   await expect(page.locator('.topbar #workflow-csv')).toContainText('8a.csv');
   await expect(page.locator('.topbar #workflow-course')).toContainText('8a');
   await page.locator('#workflow-test').click();
-  await page.locator('#workflow-access').click();
   await expect(page.locator('.topbar #workflow-test')).toContainText('01_Test');
   await expect(page.locator('#workflow-test')).toBeEnabled();
   if (await page.locator('#workflow-test').getAttribute('aria-expanded') === 'false') await page.locator('#workflow-test').click();
@@ -44,16 +47,18 @@ test('saved workflow derives folders and switches between preview and final draf
   await expect(page.locator('#workflow-test-menu')).toBeHidden();
   await expect(page.locator('#workflow-test')).toBeFocused();
   await page.getByRole('tab', { name: 'Slice exams' }).click();
-  await expect(page.locator('#slice-file option')).toHaveCount(2);
+  await expect(page.locator('#slice-file option')).toHaveCount(1);
   await page.locator('#slice-file').selectOption('pdf');
   await expect(page.getByRole('tabpanel')).toContainText('Corrected exam.pdf');
   await expect(page.getByRole('tabpanel')).toContainText('03_Split');
   await page.getByRole('tab', { name: 'Match students' }).click();
   await expect(page.getByRole('tabpanel')).toContainText('03_Split');
   await expect(page.getByRole('tabpanel')).toContainText('8a.csv');
-  await expect(page.locator('#match-folder')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Change input folder' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Change output folder' })).toBeVisible();
+  await expect(page.locator('#match-setup-body')).toContainText('04_Previews');
   await expect(page.locator('#match-csv')).toHaveCount(0);
-  await page.getByRole('tab', { name: 'Prepare drafts' }).click();
+  await page.getByRole('tab', { name: 'Prepare emails' }).click();
   await expect(page.locator('#draft-mode-final')).toBeChecked();
   await expect(page.locator('#draft-folder')).toHaveCount(0);
   await expect(page.locator('#draft-csv')).toHaveCount(0);
@@ -94,6 +99,33 @@ test('saved workflow derives folders and switches between preview and final draf
   await expect(page.locator('.slice-source')).toContainText('02_Korrigiert');
   await expect(page.locator('.slice-destination')).toContainText('03_Split');
   await expect(page.locator('#slice-file')).toHaveValue('');
+  await page.getByRole('tab', { name: 'Match students' }).click();
+  await page.evaluate(() => Object.assign(window, { __mockFolderSelections: [
+    { id: 'matching-input', name: 'Custom individual exams' },
+    { id: 'matching-output', name: 'Custom previews' },
+  ] }));
+  await page.getByRole('button', { name: 'Change input folder' }).click();
+  await expect(page.locator('#match-setup-body')).toContainText('Custom individual exams');
+  await page.getByRole('button', { name: 'Change output folder' }).click();
+  await expect(page.locator('#match-setup-body')).toContainText('Custom previews');
+  await page.locator('#match-load').click();
+  await expect(page.locator('.matching-file-list')).toContainText('Individual exam from custom input.pdf');
+  await page.locator('#match-setup').click();
+  await page.getByRole('tab', { name: 'Prepare emails' }).click();
+  await page.getByRole('tab', { name: 'Match students' }).click();
+  await expect(page.locator('#match-setup-body')).toContainText('Custom individual exams');
+  await expect(page.locator('#match-setup-body')).toContainText('Custom previews');
+  await page.screenshot({ path: 'test-results/matching-folders-mobile.png', fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.screenshot({ path: 'test-results/matching-folders-desktop.png', fullPage: true });
+  await page.locator('#workflow-test').click();
+  await page.locator('#test-clear').click();
+  await page.locator('#workflow-test').click();
+  await page.locator('#test-choice-0').click();
+  await expect(page.locator('#match-setup-body')).toContainText('03_Split');
+  await expect(page.locator('#match-setup-body')).toContainText('04_Previews');
+  await expect(page.locator('#match-setup-body')).not.toContainText('Custom');
   await page.reload();
   await expect(page.locator('.topbar #workflow-course')).toContainText('8a');
 });
@@ -103,6 +135,7 @@ test('topbar selections stay compact and accessible on mobile', async ({ page })
   await mockGoogleUi(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
+  await page.locator('#connect').click();
   await expect(page.locator('#prep-input')).toBeVisible();
   await page.locator('#workflow-csv').click();
   for (const key of ['csv', 'course']) await expect(page.locator(`.topbar #workflow-${key}`)).toBeVisible();

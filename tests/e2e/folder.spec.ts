@@ -16,8 +16,8 @@ test('creates a folder in My Drive and selects it as the output destination', as
     await route.fulfill({ json: { id: 'new-folder-id', name: 'Physics exams', mimeType: 'application/vnd.google-apps.folder' } });
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
-  await page.getByRole('button', { name: 'Connect Google Drive', exact: true }).click();
   await page.getByRole('button', { name: 'New folder', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Create a new folder' });
   await expect(dialog).toContainText('Inside My Drive');
@@ -51,6 +51,7 @@ test('creates inside the selected parent and recovers a lost response without du
     await route.abort('failed');
   });
   await page.goto('/');
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose Drive folder' }).click();
   await expect(page.locator('#panel-slice .file-selection').nth(1)).toContainText('Physics class');

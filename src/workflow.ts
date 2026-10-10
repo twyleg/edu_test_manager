@@ -58,7 +58,7 @@ export function renderWorkflowInputs(paths: WorkflowPaths, locked: boolean, read
       </button>
       <section id="workflow-test-menu" class="test-menu" aria-label="Test selection" ${testMenuOpen ? '' : 'hidden'}>
         <div class="test-menu-heading"><strong>Choose a test</strong><span>${html(paths.course?.name || 'Select a course first')}</span></div>
-        ${!access ? `<div class="test-menu-empty"><p>Enable folder access to see the tests in your course.</p><button id="workflow-access" class="btn btn-sm btn-outline-primary" ${locked || !ready ? 'disabled' : ''}>Enable folder access</button></div>` : !paths.course ? '<p class="test-menu-empty">Choose your course in the topbar to see its tests.</p>' : !tests.length ? '<p class="test-menu-empty">No tests yet. Create your first test below.</p>' : `<div class="test-menu-list">${tests.map((test, index) => {
+        ${!access ? `<div class="test-menu-empty"><p>Connect Google in the header to see the tests in your course.</p></div>` : !paths.course ? '<p class="test-menu-empty">Choose your course in the topbar to see its tests.</p>' : !tests.length ? '<p class="test-menu-empty">No tests yet. Create your first test below.</p>' : `<div class="test-menu-list">${tests.map((test, index) => {
           const parts = test.name.split(' / ');
           return `<button id="test-choice-${index}" class="test-menu-choice" data-test-id="${html(test.id)}" aria-pressed="${paths.test?.id === test.id}" ${locked ? 'disabled' : ''}><span><strong>${html(parts.at(-1)!)}</strong>${parts.length > 1 ? `<small>${html(parts.slice(0, -1).join(' / '))}</small>` : ''}</span><span class="test-menu-check" aria-hidden="true">${paths.test?.id === test.id ? '✓' : ''}</span></button>`;
         }).join('')}</div>`}

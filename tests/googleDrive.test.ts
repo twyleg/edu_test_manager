@@ -184,3 +184,32 @@ describe('preview destination parent folder', () => {
     await expect(authorizedDrive().getParentFolder(folder)).rejects.toThrow('inside a Test folder');
   });
 });
+
+describe('results JSON uploads', () => {
+  it('creates UTF-8 JSON in the course folder using a stable ID', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({}, 404)).mockResolvedValueOnce(json({ id: 'results-id', name: 'results.json', mimeType: 'application/json' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const content = '{\n  "Müller Anna": {"points":"17,5","mark":"2+"}\n}\n';
+    await authorizedDrive().saveJsonFile('results-id', 'results.json', 'course', content);
+    const request = fetchMock.mock.calls[1][1];
+    expect(request.method).toBe('POST');
+    expect(String(fetchMock.mock.calls[1][0])).toContain('uploadType=multipart');
+    const body = await (request.body as Blob).text();
+    expect(body).toContain(JSON.stringify({ id: 'results-id', name: 'results.json', mimeType: 'application/json', parents: ['course'] }));
+    expect(body).toContain(content);
+    expect(new Headers(request.headers).get('Content-Type')).toMatch(/^multipart\/related; boundary=edu-results-/);
+  });
+  it('updates existing content without creating a second file', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({ id: 'existing', name: 'results.json', mimeType: 'application/json', parents: ['course'] })).mockResolvedValueOnce(json({ id: 'existing' }));
+    vi.stubGlobal('fetch', fetchMock);
+    await authorizedDrive().saveJsonFile('existing', 'results.json', 'course', '{\n}\n');
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({ method: 'PATCH', body: '{\n}\n' });
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/files/existing?uploadType=media');
+  });
+  it('refuses to overwrite a file moved to another folder', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(json({ id: 'existing', name: 'results.json', mimeType: 'application/json', parents: ['elsewhere'] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(authorizedDrive().saveJsonFile('existing', 'results.json', 'course', '{}')).rejects.toThrow('moved, renamed, or deleted');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});

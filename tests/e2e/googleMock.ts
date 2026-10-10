@@ -70,7 +70,12 @@ export async function mockGoogleUi(page: Page, manualSelection = false, attachme
   await page.route('https://accounts.google.com/gsi/client', route => route.fulfill({ contentType: 'application/javascript', body: `
     window.google = window.google || {};
     window.google.accounts = { oauth2: {
-      initTokenClient: options => ({ requestAccessToken: overrides => options.callback({ access_token: 'browser-test-token', expires_in: 3600, scope: overrides?.scope || options.scope }) }),
+      initTokenClient: options => ({ requestAccessToken: overrides => {
+        const scope = overrides?.scope || options.scope;
+        (window.__mockRequestedScopes ||= []).push(scope);
+        window.__mockAuthorize = response => options.callback(response || { access_token: 'browser-test-token', expires_in: 3600, scope });
+        if (!window.__mockHoldAuthorization) window.__mockAuthorize();
+      } }),
       revoke: (token, done) => done(),
     } };
   ` }));

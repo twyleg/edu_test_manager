@@ -7,7 +7,7 @@ import type { DriveItem } from '../src/types';
 
 const folder = (id: string, name = id): DriveItem => ({ id, name, mimeType: folderMimeType });
 const course = folder('course', '8a');
-const input: ImportInput = { inputFolder: folder('input'), test: folder('test', 'LZKs / 01_Zahlen-Konvertieren-Dezimal-Dual'),
+const input: ImportInput = { destination: '01_Scans', inputFolder: folder('input'), test: folder('test', 'LZKs / 01_Zahlen-Konvertieren-Dezimal-Dual'),
   scan: { id: 'scan', name: 'scanner.pdf', mimeType: pdfMimeType }, course: '8a', subject: 'Informatik',
   type: 'LZK', topic: 'Zahlen Konvertieren Dezimal Dual', date: '2026-10-03' };
 
@@ -110,26 +110,30 @@ describe('test setup and scan import', () => {
     await expect(new TestCreationJob(course, 'LZK', input.topic).run(drive)).rejects.toThrow('Set up LZKs');
     expect(api.createFolder).not.toHaveBeenCalled();
   });
-  it('imports only into the selected test and preserves the scanner original', async () => {
+  it.each(['01_Scans', '02_Korrigiert'] as const)('imports into %s in the selected test and preserves the original', async destination => {
     const { api, drive, items, parents } = fakeDrive();
-    const result = await new ImportJob(input).run(drive);
-    const scans = [...items.values()].find(item => item.name === '01_Scans')!;
+    const result = await new ImportJob({ ...input, destination }).run(drive);
+    const scans = [...items.values()].find(item => item.name === destination)!;
     expect(parents.get(scans.id)).toBe('test');
     expect(parents.get(result.id)).toBe(scans.id);
     expect(result.name).toBe('20261003_LZK-IF8a-Zahlen-Konvertieren-Dezimal-Dual.pdf');
     expect(items.get('scan')!.name).toBe('scanner.pdf');
     expect(parents.get('scan')).toBe('input');
-    expect(api.createFolder.mock.calls.map(call => call[1])).toEqual(['01_Scans']);
+    expect(api.createFolder.mock.calls.map(call => call[1])).toEqual([destination]);
   });
-  it('reuses the same copy ID when retrying an interrupted import', async () => {
+  it.each(['01_Scans', '02_Korrigiert'] as const)('retains the copy ID and %s destination across retries', async destination => {
     const { api, drive } = fakeDrive();
     const copy = api.copyScan.getMockImplementation()!;
     api.copyScan.mockImplementationOnce(async (...args) => { await copy(...args); throw new Error('Lost copy response'); });
-    const job = new ImportJob(input);
+    const selection = { ...input, destination };
+    const job = new ImportJob(selection);
+    selection.destination = destination === '01_Scans' ? '02_Korrigiert' : '01_Scans';
     await expect(job.run(drive)).rejects.toThrow('Lost copy response');
     const result = await job.run(drive);
     expect(api.copyScan.mock.calls[0][4]).toBe(api.copyScan.mock.calls[1][4]);
     expect(result.id).toBe(api.copyScan.mock.calls[0][4]);
+    expect(job.input.destination).toBe(destination);
+    expect(api.copyScan.mock.calls[0][2]).toBe(api.copyScan.mock.calls[1][2]);
   });
   it('checks source membership before creating scan folders', async () => {
     const { api, drive, parents } = fakeDrive(); parents.set('scan', 'elsewhere');

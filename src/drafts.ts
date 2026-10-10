@@ -153,7 +153,7 @@ export class DraftTask {
       this.labelNames = [...new Set(this.labels.split(',').map(name => name.trim()).filter(Boolean))];
       if (this.labelNames.some(name => /[\r\n\u0000]/.test(name))) throw new Error('Enter label names separated by commas without line breaks.');
       if (this.labelNames.length > 100) throw new Error('Use at most 100 labels.');
-      if (this.labelNames.length && !this.google.gmailLabelsAccess) throw new Error('Enable Gmail labels before previewing.');
+      if (this.labelNames.length && !this.google.gmailLabelsAccess) throw new Error('Connect Google in the header to grant Gmail label access, then preview again.');
       prepareDraftRows(this.rows, this.subject, this.body);
       this.prepared = true; this.error = ''; this.expanded = { setup: false, compose: false, review: true };
       this.message = 'Review each recipient, expanded message and PDF attachment before creating drafts.';
@@ -166,7 +166,7 @@ export class DraftTask {
     try {
       const account = await this.gmail.account();
       if (account !== this.account) throw new Error('The Gmail account changed. Reconnect the account shown in the preview before continuing.');
-      if (this.labelNames.length && !this.google.gmailLabelsAccess) throw new Error('Enable Gmail labels before continuing.');
+      if (this.labelNames.length && !this.google.gmailLabelsAccess) throw new Error('Connect Google in the header to grant Gmail label access, then retry.');
       this.started = true;
       const labelIds = await this.gmail.ensureLabels(this.labelNames);
       const extraAttachments: Attachment[] = await Promise.all(this.extraFiles.map(async file => ({ filename: file.name, mimeType: file.type || 'application/octet-stream', bytes: new Uint8Array(await file.arrayBuffer()) })));
@@ -219,8 +219,6 @@ export class DraftTask {
   handle(id: string): boolean {
     if (id.startsWith('draft-extra-remove-')) { this.removeAttachment(Number(id.slice('draft-extra-remove-'.length))); return true; }
     switch (id) {
-      case 'draft-label-access': this.google.connectDrafts(true); break;
-      case 'draft-access': this.google.connectDrafts(); break;
       case 'draft-load': void this.load(); break;
       case 'draft-prepare': this.prepare(); break;
       case 'draft-create': void this.create(); break;
@@ -242,24 +240,22 @@ export class DraftTask {
     const done = selected.filter(row => this.complete(row)).length;
     const section = (key: 'setup' | 'compose' | 'review', number: number, title: string, summary: string, available: boolean) => `<section class="subtask workspace-panel ${this.busy ? 'subtask-busy' : ''}"><h2 class="subtask-heading"><button id="draft-toggle-${key}" aria-controls="draft-${key}-body" aria-expanded="${this.expanded[key]}" ${disabled(this.busy || !available)}><span class="step-number">${number}</span><span class="subtask-title">${title}<small>${html(summary)}</small></span><span aria-hidden="true">${this.expanded[key] ? '⌃' : '⌄'}</span></button></h2><div id="draft-${key}-body" class="subtask-body" ${this.expanded[key] ? '' : 'hidden'}>`;
     return `<section id="panel-drafts" role="tabpanel" aria-labelledby="task-drafts">
-      <div class="intro"><div><p class="eyebrow">PREPARE DRAFTS</p><h1>Ready for your final check.</h1><p class="lead-copy">Create a Gmail draft for each student with their exam attached. Review and send later in Gmail.</p></div></div>
+      <div class="intro"><div><p class="eyebrow">PREPARE EMAILS</p><h1>Ready for your final check.</h1><p class="lead-copy">Create a Gmail draft for each student with their exam attached. Review and send later in Gmail.</p></div></div>
       <div role="alert" class="alert alert-danger" ${this.error ? '' : 'hidden'}>${html(this.error)}</div>
       ${this.started ? `<div class="batch-actions"><button id="draft-new" class="btn btn-sm btn-outline-secondary" ${disabled(this.busy)}>Start a new draft batch</button></div>` : ''}
       ${section('setup', 1, automatic ? 'Choose draft type' : 'Choose exams & student list', `${this.folder?.name || 'Choose a folder'} · ${this.csv?.name || 'Choose a CSV'}`, true)}
-        <fieldset id="draft-mode" class="draft-mode-switch" ${disabled(locked)}><legend>What should students receive?</legend><div class="draft-mode-options">
-          ${(['preview', 'final'] as const).map(mode => `<label class="draft-mode-option"><input id="draft-mode-${mode}" type="radio" name="draft-mode" value="${mode}" ${this.mode === mode ? 'checked' : ''} /><span><strong>${mode === 'preview' ? 'Preview drafts' : 'Final drafts'}</strong><small>${mode === 'preview' ? 'Front-page previews for students to check' : 'Complete corrected exams'}</small></span></label>`).join('')}
-        </div></fieldset>
+        <fieldset id="draft-mode" class="draft-mode-switch" aria-describedby="draft-mode-hint" ${disabled(locked)}><legend>What should students receive?</legend><div class="draft-mode-options">
+          ${(['preview', 'final'] as const).map(mode => `<label class="draft-mode-option"><input id="draft-mode-${mode}" type="radio" name="draft-mode" value="${mode}" ${this.mode === mode ? 'checked' : ''} /><span>${mode === 'preview' ? 'Preview drafts' : 'Final drafts'}</span></label>`).join('')}
+        </div><p id="draft-mode-hint" class="form-text">${this.mode === 'preview' ? 'Front-page previews for students to check' : 'Complete corrected exams'}</p></fieldset>
         ${automatic ? renderTaskInputs(this.folder, this.csv, this.mode === 'preview' ? '04_Previews' : '03_Split') : `        <div class="selection-grid"><div class="selection-step"><h3>Renamed exam folder</h3><div class="file-selection"><strong>${html(this.folder?.name || 'No folder selected')}</strong></div><div class="selection-actions"><button id="draft-folder" class="btn btn-outline-primary" ${disabled(locked || !ready)}>Choose exam folder</button></div></div>
         <div class="selection-step"><h3>Student CSV</h3><div class="file-selection"><strong>${html(this.csv?.name || 'No CSV selected')}</strong></div><div class="selection-actions"><button id="draft-csv" class="btn btn-outline-primary" ${disabled(locked || !ready)}>Choose student CSV</button></div></div></div>
 `}
-        ${!this.google.draftsAccess || !this.google.matchingAccess ? `<div class="matching-access"><p>Allow Gmail draft creation and access to the exam files. This task creates drafts only.</p><button id="draft-access" class="btn btn-outline-primary" ${disabled(this.busy || !ready)}>Enable Gmail drafts</button></div>` : ''}
         <div class="panel-footer"><span>Matches files by their exact NR_NACHNAME_VORNAME.pdf filename.</span><button id="draft-load" class="btn btn-primary" ${disabled(locked || !this.folder || !this.csv || !this.google.draftsAccess || !this.google.matchingAccess)}>Load recipients & exams</button></div>
       </div></section>
       ${section('compose', 2, 'Choose files & write template', this.rows.length ? `${selected.length} of ${this.rows.length} PDFs selected` : 'Available after loading', this.rows.length > 0)}
         <div class="draft-editor"><p>Gmail account: <strong>${html(this.account)}</strong></p><div class="draft-file-list">${this.rows.map((row, index) => `<label class="matching-file-row"><input id="draft-file-${index}" data-draft-file="${index}" type="checkbox" ${row.included ? 'checked' : ''} ${disabled(locked || Boolean(row.issue))} /><span><strong>${html(row.file.name)}</strong><small>${html(row.issue || row.student!.email)}</small></span></label>`).join('')}</div>
         <label for="draft-subject" class="form-label">Subject template</label><input id="draft-subject" class="form-control" value="${html(this.subject)}" ${disabled(locked)} />
         <label for="draft-labels" class="form-label">Gmail labels (comma-separated)</label><input id="draft-labels" class="form-control" placeholder="bulk-send, 8A, Informatik" value="${html(this.labels)}" ${disabled(locked)} /><p class="form-text">Applied to every draft. Missing labels are created. Use bulk-send to find these drafts in Batch send; Gmail may take time to display labels.</p>
-        ${!this.google.gmailLabelsAccess ? `<button id="draft-label-access" class="btn btn-outline-primary" ${disabled(this.busy || !ready)}>Enable Gmail labels</button>` : ''}
         <label for="draft-body" class="form-label">Message template</label><textarea id="draft-body" class="form-control" rows="8" ${disabled(locked)}>${html(this.body)}</textarea><p class="form-text">Use CSV column names in double braces: {{Vorname}}, {{Nachname}}, {{Nr.}}, {{E-Mail-Adresse}}. Plain text only. Unknown placeholders are reported before creation.</p>
         <label for="draft-extra" class="form-label">Shared attachments for all students</label><input id="draft-extra" type="file" multiple class="form-control" ${disabled(locked)} /><button id="draft-extra-drive" class="btn btn-outline-primary" ${disabled(locked || !ready)}>Add attachments from Drive</button><p class="form-text">Add files from your computer or Google Drive. Google documents are attached as PDFs. Each draft includes its exam PDF and all shared files, up to 25 MB combined.</p>
         ${this.extraFiles.map((file, index) => `<p class="shared-attachment">${html(file.name)} · ${(file.size / 1048576).toFixed(2)} MB <button id="draft-extra-remove-${index}" class="btn btn-sm btn-outline-secondary" aria-label="Remove ${html(file.name)}" ${disabled(locked)}>Remove</button></p>`).join('')}

@@ -1,12 +1,16 @@
 import '@fontsource-variable/dm-sans';
 import '@fontsource-variable/manrope';
-import { googleAllowed, mountPrivacy } from './privacy';
+import { googleAllowed, localOnly, mountPrivacy } from './privacy';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import './styles/main.css';
 import { BatchSendTask } from './batchSend';
 import { DraftTask } from './drafts';
+import { DocumentationTask } from './documentation';
+import { ExamCache } from './examCache';
 import { MatchingTask } from './matching';
 import { ImportTask } from './preparation';
+import { deriveCourseSubject } from './courseSubject';
+import type { Subject } from './testNames';
 import { confirmCourseSetup, openNewTestDialog } from './testDialogs';
 import { loadWorkflow, saveWorkflow, listCourseTests, testFolders, renderWorkflowInputs } from './workflow';
 import type { DriveItem } from './types';
@@ -27,6 +31,7 @@ let tests: DriveItem[] = paths.test ? [paths.test] : [];
 let folders: Awaited<ReturnType<typeof testFolders>> = {};
 let globalPicker: 'csv' | 'course' | undefined;
 let checkedCourse: string | undefined;
+const courseSubjects = new Map<string, Promise<Subject | undefined>>();
 let correctedPdfs: DriveItem[] = [];
 let sliceInputOverride: DriveItem | undefined;
 let sliceOutputOverride: DriveItem | undefined;
@@ -37,14 +42,17 @@ let testMenuOpen = false;
 let sourceBytes: Uint8Array | undefined;
 let controller: AbortController | undefined;
 let pickerTask: 'preparation' | 'slice' | 'match' | 'drafts' = 'slice';
-const matching = new MatchingTask(drive, render, busy => { state.busy = busy ? 'match' : ''; });
+const examCache = new ExamCache(drive);
+examCache.setCourse(paths.course?.id);
+const matching = new MatchingTask(drive, render, busy => { state.busy = busy ? 'match' : ''; }, examCache);
 const batchSend = new BatchSendTask(drive, render, busy => { state.busy = busy ? 'send' : ''; });
 const drafts = new DraftTask(drive, render, busy => { state.busy = busy ? 'drafts' : ''; });
+const documentation = new DocumentationTask(drive, render, busy => { state.busy = busy ? 'documentation' : ''; }, examCache);
 const preparation = new ImportTask(drive, render, busy => { state.busy = busy ? 'preparation' : ''; }, input => { paths.input = input; saveWorkflow(paths); });
 
 preparation.setPaths(paths.input, paths.course, paths.test);
 function pathsLocked(): boolean {
-  return Boolean(state.busy || preparation.hasIncompleteJob || matching.hasIncompletePreviewExport || drafts.hasIncompleteBatch || state.uploadStarted);
+  return Boolean(state.busy || preparation.hasIncompleteJob || matching.hasIncompletePreviewExport || drafts.hasIncompleteBatch || documentation.hasUnsavedChanges || state.uploadStarted);
 }
 function syncSliceFolders(): void {
   if (sliceTestId !== paths.test?.id) {
@@ -55,9 +63,11 @@ function syncSliceFolders(): void {
   state.folder = sliceOutputOverride || folders.split;
 }
 function applyPaths(): void {
+  examCache.setCourse(paths.course?.id);
   preparation.setPaths(paths.input, paths.course, paths.test);
   syncSliceFolders();
-  matching.setPaths(folders.split, paths.csv);
+  matching.setPaths(folders.split, paths.csv, folders.previews, paths.test);
+  documentation.setPaths(paths.course, paths.test, matching.folder || folders.split, paths.csv);
   drafts.setPaths(folders, paths.csv);
   saveWorkflow(paths);
 }
@@ -65,6 +75,9 @@ async function refreshPaths(): Promise<void> {
   if (refreshingPaths || !drive.matchingAccess || !paths.course) return;
   refreshingPaths = true; state.busy = 'folder'; render();
   try {
+    const course = paths.course;
+    if (!courseSubjects.has(course.id)) courseSubjects.set(course.id, deriveCourseSubject(drive, course));
+    preparation.setDerivedSubject(course.id, await courseSubjects.get(course.id));
     if (checkedCourse !== paths.course.id) {
       await confirmCourseSetup(drive, paths.course);
       checkedCourse = paths.course.id;
@@ -107,11 +120,13 @@ async function createTest(): Promise<void> {
   }
 }
 function render(): void {
+  state.localOnly = localOnly();
+  if (state.localOnly) state.task = 'slice';
   state.workflowTest = Boolean(paths.test);
   state.correctedPdfs = state.inputFolder ? correctedPdfs : undefined;
   const focused = document.activeElement?.id;
-  app.innerHTML = renderApp(state, state.task === 'match' ? matching.render(state.ready && hasGoogleConfig(), Boolean(paths.course)) : '', state.task === 'drafts' ? drafts.render(state.ready && hasGoogleConfig(), Boolean(paths.course)) : '', state.task === 'send' ? batchSend.render(state.ready && hasGoogleConfig()) : '', state.task === 'preparation' ? preparation.render(state.ready && hasGoogleConfig()) : '', '', renderWorkflowInputs(paths, pathsLocked(), state.ready && hasGoogleConfig(), tests, drive.matchingAccess, testMenuOpen));
-  for (const id of [ paths.csv ? 'match-csv' : '', paths.csv ? 'draft-csv' : '', folders.split ? 'match-folder' : '', paths.test ? 'draft-folder' : '']) {
+  app.innerHTML = renderApp(state, state.task === 'match' ? matching.render(state.ready && hasGoogleConfig() && !state.busy, Boolean(paths.course)) : '', state.task === 'drafts' ? drafts.render(state.ready && hasGoogleConfig(), Boolean(paths.course)) : '', state.task === 'send' ? batchSend.render(state.ready && hasGoogleConfig()) : '', state.task === 'preparation' ? preparation.render(state.ready && hasGoogleConfig()) : '', '', renderWorkflowInputs(paths, pathsLocked(), state.ready && state.connected && hasGoogleConfig(), tests, drive.matchingAccess, testMenuOpen), state.task === 'documentation' ? documentation.render(state.connected && !state.busy) : '');
+  for (const id of [ paths.csv ? 'match-csv' : '', paths.csv ? 'draft-csv' : '', paths.test ? 'draft-folder' : '']) {
     if (id) document.getElementById(id)?.setAttribute('hidden', '');
   }
   if (focused) document.getElementById(focused)?.focus({ preventScroll: true });
@@ -295,13 +310,14 @@ app.addEventListener('click', event => {
         if (testMenuOpen) document.querySelector<HTMLElement>('#workflow-test-menu [aria-pressed="true"], #workflow-test-menu button:not(:disabled)')?.focus();
         return;
       }
-      if (target.id === 'workflow-access') { drive.connectMatching(); return; }
       if (target.id === 'workflow-refresh') { void refreshPaths(); return; }
       globalPicker = target.id.slice(9) as typeof globalPicker;
       state.busy = 'picker'; render(); drive.openPicker(globalPicker === 'csv' ? 'csv' : 'folder'); return;
     }
     if (target.dataset.task) {
+      if (!state.connected) return;
       state.task = target.dataset.task as AppState['task'];
+      if (state.task === 'documentation') documentation.setPaths(paths.course, paths.test, matching.folder || folders.split, paths.csv);
       if (state.task !== 'preparation' && paths.course && drive.matchingAccess && !pathsLocked()) void refreshPaths();
       if (state.task === 'match' && !paths.course) matching.prefill(state.folder);
       if (state.task === 'drafts' && !paths.course) drafts.prefill(matching.folder || state.folder, matching.csv);
@@ -322,10 +338,12 @@ app.addEventListener('click', event => {
     }
     if (state.task === 'preparation' && preparation.handle(target.id)) return;
     if (state.task === 'send' && batchSend.handle(target.id)) return;
+    if (state.task === 'documentation' && documentation.handle(target.id)) return;
     if (state.task === 'drafts' && drafts.handle(target.id)) return;
-    if (target.id === 'match-folder' || target.id === 'match-csv') {
+    if (target.id === 'match-folder' || target.id === 'match-csv' || target.id === 'match-output') {
+      if (state.busy || matching.hasIncompletePreviewExport) return;
       globalPicker = undefined; pickerTask = 'match'; state.busy = 'picker'; state.error = ''; render();
-      matching.pick(target.id === 'match-folder' ? 'folder' : 'csv');
+      matching.pick(target.id === 'match-output' ? 'output' : target.id === 'match-folder' ? 'folder' : 'csv');
       return;
     }
     if (state.task === 'match' && matching.handle(target.id)) return;
@@ -357,10 +375,12 @@ app.addEventListener('click', event => {
     }
     switch (target.id) {
       case 'connect':
-        if (drive.connected) {
+        if (drive.workflowAccess) {
+          if (documentation.hasUnsavedChanges && !window.confirm('Disconnect and discard unsaved documentation entries?')) return;
+          state.hasConnected = false;
           sliceInputOverride = sliceOutputOverride = undefined; state.inputFolder = undefined; correctedPdfs = [];
-          drive.disconnect(); batchSend.reset(); drafts.reset(); matching.reset(); preparation.reset(); clearScan(); state.source = state.folder = state.localFile = undefined; render();
-        } else drive.connect();
+          drive.disconnect(); examCache.clear(); batchSend.reset(); drafts.reset(); matching.reset(); documentation.reset(); preparation.reset(); clearScan(); state.source = state.folder = state.localFile = undefined; render();
+        } else { state.busy = 'connect'; state.error = ''; render(); drive.connect(); }
         break;
       case 'choose-slice-input':
         globalPicker = undefined; pickerTask = 'slice'; slicePickerTarget = 'input';
@@ -418,14 +438,23 @@ app.addEventListener('input', event => {
   const input = event.target as HTMLInputElement;
   if (state.task === 'preparation' && !state.busy && input.id.startsWith('prep-')) preparation.change(input.id, input.value);
   if (input.id === 'student-search') matching.input(input.value);
+  if (state.task === 'documentation') documentation.input(input.id, input.value);
   if (state.task === 'drafts' && ['draft-subject', 'draft-body', 'draft-labels'].includes(input.id)) drafts.input(input.id, input.value);
 });
 
 app.addEventListener('keydown', event => {
   const target = event.target as HTMLElement;
+  if (state.task === 'documentation' && documentation.highlightKeydown(event)) return;
+  if (state.task === 'documentation' && (target.id === 'doc-points' || target.id === 'doc-mark')) {
+    if (event.key === 'Enter' && !event.isComposing && !event.repeat && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      event.preventDefault();
+      document.getElementById('doc-save-next')?.click();
+    }
+    return;
+  }
   if (target.id === 'student-search') { matching.keydown(event); return; }
   if (!target.dataset.task || state.busy) return;
-  const tabs = ['preparation', 'slice', 'match', 'drafts', 'send'];
+  const tabs = ['preparation', 'slice', 'match', 'documentation', 'drafts', 'send'];
   const index = tabs.indexOf(state.task);
   const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
   if (next < 0) return;
@@ -433,9 +462,13 @@ app.addEventListener('keydown', event => {
   document.getElementById(`task-${tabs[next]}`)?.click();
 });
 
+for (const type of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const) {
+  app.addEventListener(type, event => { if (state.task === 'documentation') documentation.highlightPointer(event); });
+}
+
 app.addEventListener('change', event => {
   const input = event.target as HTMLInputElement;
-  if (state.task === 'preparation' && !state.busy && input.id.startsWith('prep-')) { preparation.change(input.id, input.value); return; }
+  if (state.task === 'preparation' && input.id.startsWith('prep-') && (!state.busy || (input.id === 'prep-subject' && state.busy === 'folder'))) { preparation.change(input.id, input.value); return; }
   if (input.id === 'slice-file') {
     if (state.busy || state.uploadStarted || state.pages.length) return;
     clearScan(); state.localFile = undefined; state.source = correctedPdfs.find(file => file.id === input.value); render(); return;
@@ -478,22 +511,31 @@ app.addEventListener('change', event => {
 });
 
 window.addEventListener('beforeunload', event => {
-  if (state.busy || preparation.hasIncompleteJob || matching.hasIncompletePreviewExport || drafts.hasIncompleteBatch || (state.uploadStarted && state.files.some(file => !file.uploaded))) event.preventDefault();
+  if (state.busy || preparation.hasIncompleteJob || matching.hasIncompletePreviewExport || drafts.hasIncompleteBatch || documentation.hasUnsavedChanges || (state.uploadStarted && state.files.some(file => !file.uploaded))) event.preventDefault();
 });
 
 let googleInitialization: Promise<void> | undefined;
 function initializeGoogle(): void {
   if (!hasGoogleConfig() || googleInitialization) return;
   googleInitialization = drive.initialize({
-    onConnection: connected => { state.connected = connected; render(); if (connected && drive.matchingAccess && !globalPicker && !pathsLocked()) { void refreshPaths(); } },
+    onConnection: connected => {
+      const connecting = state.busy === 'connect';
+      if (connecting) state.busy = '';
+      state.connected = drive.workflowAccess;
+      if (state.connected) state.hasConnected = true;
+      if (!state.connected) testMenuOpen = false;
+      if (connecting && connected && !state.connected) state.error = 'Grant Drive and Gmail permissions through Connect Google to enable all tasks.';
+      render();
+      if (state.connected && !globalPicker && !pathsLocked()) void refreshPaths();
+    },
     onError: message => { globalPicker = undefined; state.busy = ''; reportError(new Error(message)); },
     onPickerClosed: selected => { if (!selected) globalPicker = undefined; state.busy = ''; render(); },
     onPick: (kind, item, items) => {
       if (globalPicker) {
         const key = globalPicker; globalPicker = undefined; paths[key] = item;
-        if (key === 'course') { checkedCourse = undefined; paths.test = undefined; tests = []; folders = {}; correctedPdfs = []; clearScan(); state.source = state.localFile = undefined; }
+        if (key === 'course') { checkedCourse = undefined; courseSubjects.delete(item.id); paths.test = undefined; tests = []; folders = {}; correctedPdfs = []; clearScan(); state.source = state.localFile = undefined; }
         applyPaths(); render();
-        if (key === 'course') { if (drive.matchingAccess) void refreshPaths(); else drive.connectMatching(); }
+        if (key === 'course' && state.connected) void refreshPaths();
         return;
       }
       if (pickerTask === 'preparation') { preparation.accept(item); render(); return; }
@@ -511,8 +553,8 @@ mountPrivacy((allowed, previous) => {
   if (allowed) { saveWorkflow(paths); initializeGoogle(); }
   else if (previous) {
     // Disable app API calls immediately, even if a beforeunload prompt is cancelled.
-    drive.forgetSession(); state.ready = false; googleInitialization = undefined; render();
+    drive.forgetSession(); examCache.clear(); state.ready = state.connected = false; googleInitialization = undefined; render();
     window.location.reload();
-  }
+  } else render();
 }, () => Boolean(state.busy));
 if (googleAllowed()) initializeGoogle();

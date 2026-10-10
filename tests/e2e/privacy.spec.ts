@@ -20,12 +20,15 @@ test('Google stays blocked until chosen; fonts are local and folder remembering 
   await page.locator('#privacy-remember').click();
   await expect(page.locator('#connect')).toBeEnabled();
   expect(external.some(url => url.includes('accounts.google.com'))).toBe(true);
+  await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Match students', exact: true }).click();
   await page.locator('#match-csv').click();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('edu-test-manager-student-list-folder'))).toBe('student-list-folder');
+  await page.evaluate(() => localStorage.setItem('edu-test-manager-documentation-highlights-v1', JSON.stringify({ course: { points: { x: .1, y: .1, width: .4, height: .2 } } })));
   await page.locator('#privacy-settings').click();
   await page.locator('#privacy-google').click();
   expect(await page.evaluate(() => localStorage.getItem('edu-test-manager-student-list-folder'))).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('edu-test-manager-documentation-highlights-v1'))).toBeNull();
   await page.locator('#match-csv').click();
   await expect(page.locator('#match-setup-body')).toContainText('students.csv');
   expect(await page.evaluate(() => localStorage.getItem('edu-test-manager-student-list-folder'))).toBeNull();
