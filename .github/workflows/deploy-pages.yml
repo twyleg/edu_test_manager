@@ -31,10 +31,16 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           for (const key of ['VITE_GOOGLE_CLIENT_ID', 'VITE_GOOGLE_API_KEY', 'VITE_GOOGLE_APP_ID']) {
-            if (!process.env[key]?.trim() || process.env[key].startsWith('your-')) throw new Error(`Set repository variable ${key} before deploying.`);
+            if (!process.env[key]?.trim() || process.env[key].startsWith('your-')) {
+              throw new Error(`Set repository variable ${key} before deploying.`);
+            }
           }
-          if (!/^\d+$/.test(process.env.VITE_GOOGLE_APP_ID)) throw new Error('VITE_GOOGLE_APP_ID must be the numeric Cloud project number.');
+          if (!/^\d+$/.test(process.env.VITE_GOOGLE_APP_ID)) {
+            throw new Error('VITE_GOOGLE_APP_ID must be the numeric Cloud project number.');
+          }
           JS
+      - run: npm run format:check
+      - run: npm run lint
       - run: npm test
       - run: npm run build:pages
       - uses: actions/configure-pages@v5

@@ -1,19 +1,35 @@
 import { test, expect } from '@playwright/test';
 import { mockGoogleUi } from './googleMock';
 
-test.beforeEach(async ({ page }) => { await mockGoogleUi(page); });
+test.beforeEach(async ({ page }) => {
+  await mockGoogleUi(page);
+});
 
 test('creates a folder in My Drive and selects it as the output destination', async ({ page }) => {
   let writes = 0;
-  await page.route('https://www.googleapis.com/**', async route => {
+  await page.route('https://www.googleapis.com/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname.endsWith('/generateIds')) return route.fulfill({ json: { ids: ['new-folder-id'] } });
-    if (url.pathname.endsWith('/new-folder-id')) return route.fulfill({ status: 404, json: {} });
+    if (url.pathname.endsWith('/generateIds')) {
+      return route.fulfill({ json: { ids: ['new-folder-id'] } });
+    }
+    if (url.pathname.endsWith('/new-folder-id')) {
+      return route.fulfill({ status: 404, json: {} });
+    }
     expect(request.method()).toBe('POST');
-    expect(request.postDataJSON()).toEqual({ id: 'new-folder-id', name: 'Physics exams', mimeType: 'application/vnd.google-apps.folder' });
+    expect(request.postDataJSON()).toEqual({
+      id: 'new-folder-id',
+      name: 'Physics exams',
+      mimeType: 'application/vnd.google-apps.folder',
+    });
     writes++;
-    await route.fulfill({ json: { id: 'new-folder-id', name: 'Physics exams', mimeType: 'application/vnd.google-apps.folder' } });
+    await route.fulfill({
+      json: {
+        id: 'new-folder-id',
+        name: 'Physics exams',
+        mimeType: 'application/vnd.google-apps.folder',
+      },
+    });
   });
   await page.goto('/');
   await page.locator('#connect').click();
@@ -31,19 +47,33 @@ test('creates a folder in My Drive and selects it as the output destination', as
   expect(writes).toBe(1);
 });
 
-test('creates inside the selected parent and recovers a lost response without duplicates', async ({ page }) => {
+test('creates inside the selected parent and recovers a lost response without duplicates', async ({
+  page,
+}) => {
   let created = false;
   let writes = 0;
-  await page.route('https://www.googleapis.com/**', async route => {
+  await page.route('https://www.googleapis.com/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname.endsWith('/destination-folder')) return route.fulfill({ json: {
-      mimeType: 'application/vnd.google-apps.folder', capabilities: { canAddChildren: true },
-    } });
-    if (url.pathname.endsWith('/generateIds')) return route.fulfill({ json: { ids: ['child-id'] } });
-    if (url.pathname.endsWith('/child-id')) return route.fulfill({ status: created ? 200 : 404,
-      json: created ? { id: 'child-id', name: 'September', mimeType: 'application/vnd.google-apps.folder' } : {},
-    });
+    if (url.pathname.endsWith('/destination-folder')) {
+      return route.fulfill({
+        json: {
+          mimeType: 'application/vnd.google-apps.folder',
+          capabilities: { canAddChildren: true },
+        },
+      });
+    }
+    if (url.pathname.endsWith('/generateIds')) {
+      return route.fulfill({ json: { ids: ['child-id'] } });
+    }
+    if (url.pathname.endsWith('/child-id')) {
+      return route.fulfill({
+        status: created ? 200 : 404,
+        json: created
+          ? { id: 'child-id', name: 'September', mimeType: 'application/vnd.google-apps.folder' }
+          : {},
+      });
+    }
     expect(request.method()).toBe('POST');
     expect(request.postDataJSON().parents).toEqual(['destination-folder']);
     writes++;

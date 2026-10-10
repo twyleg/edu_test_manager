@@ -7,7 +7,15 @@ declare global {
   }
 
   interface Gapi {
-    load(api: string, options: { callback: () => void; onerror: () => void; timeout: number; ontimeout: () => void }): void;
+    load(
+      api: string,
+      options: {
+        callback: () => void;
+        onerror: () => void;
+        timeout: number;
+        ontimeout: () => void;
+      },
+    ): void;
   }
 
   interface GoogleIdentityAndPicker {
@@ -83,26 +91,43 @@ declare global {
 
     class DocsView {
       constructor(viewId: string);
+
       setLabel(label: string): DocsView;
+
       setEnableDrives(enabled: boolean): DocsView;
+
       setIncludeFolders(includeFolders: boolean): DocsView;
+
       setMode(mode: string): DocsView;
+
       setMimeTypes(mimeTypes: string): DocsView;
+
       setParent(parentId: string): DocsView;
+
       setSelectFolderEnabled(selectFolderEnabled: boolean): DocsView;
     }
 
     class PickerBuilder {
       addView(view: DocsView): PickerBuilder;
+
       enableFeature(feature: string): PickerBuilder;
+
       setAppId(appId: string): PickerBuilder;
+
       setCallback(callback: (data: PickerResponse) => void): PickerBuilder;
+
       setDeveloperKey(key: string): PickerBuilder;
+
       setOAuthToken(token: string): PickerBuilder;
+
       setTitle(title: string): PickerBuilder;
+
       setOrigin(origin: string): PickerBuilder;
+
       setRelayUrl(url: string): PickerBuilder;
+
       setSelectableMimeTypes(mimeTypes: string): PickerBuilder;
+
       build(): Picker;
     }
 

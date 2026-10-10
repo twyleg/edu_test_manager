@@ -2,10 +2,14 @@ import { test, expect } from '@playwright/test';
 import { PDFDocument } from 'pdf-lib';
 import { mockGoogleUi } from './googleMock';
 
-test('Drive picker, download, upload and reconnect retry preserve completed files', async ({ page }) => {
+test('Drive picker, download, upload and reconnect retry preserve completed files', async ({
+  page,
+}) => {
   await mockGoogleUi(page);
   const pdf = await PDFDocument.create();
-  for (let index = 0; index < 3; index++) pdf.addPage();
+  for (let index = 0; index < 3; index++) {
+    pdf.addPage();
+  }
   const pdfBytes = Buffer.from(await pdf.save());
   let nextId = 0;
   let loseResponse = true;
@@ -13,7 +17,7 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
   const completed = new Set<string>();
   const uploadCalls: string[] = [];
   const uploadedBodies: Buffer[] = [];
-  await page.route('https://www.googleapis.com/**', async route => {
+  await page.route('https://www.googleapis.com/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     expect(request.headers().authorization).toBe('Bearer browser-test-token');
@@ -24,13 +28,23 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
       expect(url.searchParams.get('alt')).toBe('media');
       return route.fulfill({ contentType: 'application/pdf', body: pdfBytes });
     }
-    if (url.pathname.endsWith('/destination-folder')) return route.fulfill({ json: {
-      mimeType: 'application/vnd.google-apps.folder', capabilities: { canAddChildren: true },
-    } });
-    if (url.pathname.endsWith('/generateIds')) return route.fulfill({ json: { ids: [`generated-${++nextId}`] } });
+    if (url.pathname.endsWith('/destination-folder')) {
+      return route.fulfill({
+        json: {
+          mimeType: 'application/vnd.google-apps.folder',
+          capabilities: { canAddChildren: true },
+        },
+      });
+    }
+    if (url.pathname.endsWith('/generateIds')) {
+      return route.fulfill({ json: { ids: [`generated-${++nextId}`] } });
+    }
     if (url.pathname.startsWith('/drive/v3/files/generated-')) {
       const id = url.pathname.split('/').at(-1)!;
-      return route.fulfill({ status: completed.has(id) ? 200 : 404, json: completed.has(id) ? { id } : {} });
+      return route.fulfill({
+        status: completed.has(id) ? 200 : 404,
+        json: completed.has(id) ? { id } : {},
+      });
     }
     if (url.pathname === '/upload/drive/v3/files') {
       const metadata = request.postDataJSON();
@@ -38,10 +52,13 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
       expect(metadata.mimeType).toBe('application/pdf');
       expect(created.has(metadata.id)).toBe(false);
       created.set(metadata.id, metadata);
-      return route.fulfill({ headers: {
-        Location: `https://www.googleapis.com/upload/session/${metadata.id}`,
-        'Access-Control-Expose-Headers': 'Location',
-      }, body: '' });
+      return route.fulfill({
+        headers: {
+          Location: `https://www.googleapis.com/upload/session/${metadata.id}`,
+          'Access-Control-Expose-Headers': 'Location',
+        },
+        body: '',
+      });
     }
     if (url.pathname.startsWith('/upload/session/')) {
       const id = url.pathname.split('/').at(-1)!;
@@ -60,11 +77,15 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
   await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
   await page.getByRole('button', { name: 'Choose PDF from Drive' }).click();
-  await expect(page.locator('#panel-slice .file-selection').first()).toContainText('Drive exam.pdf');
+  await expect(page.locator('#panel-slice .file-selection').first()).toContainText(
+    'Drive exam.pdf',
+  );
   await page.getByRole('button', { name: 'Choose Drive folder' }).click();
   await page.getByRole('button', { name: 'Scan PDF', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Scan complete', { timeout: 90000 });
-  for (let index = 0; index < 3; index++) await page.locator(`#front-${index}`).check();
+  for (let index = 0; index < 3; index++) {
+    await page.locator(`#front-${index}`).check();
+  }
   await page.getByRole('button', { name: 'Prepare 3 PDFs' }).click();
   await page.getByRole('button', { name: 'Save 3 PDFs to Drive' }).click();
   await expect(page.getByRole('alert')).toContainText('session expired');
@@ -80,7 +101,9 @@ test('Drive picker, download, upload and reconnect retry preserve completed file
   await expect(page.getByRole('link', { name: 'Saved ↗' })).toHaveCount(3);
   expect(uploadCalls).toEqual(['generated-1', 'generated-2', 'generated-3']);
   expect(created.size).toBe(3);
-  for (const bytes of uploadedBodies) expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+  for (const bytes of uploadedBodies) {
+    expect((await PDFDocument.load(bytes)).getPageCount()).toBe(1);
+  }
   await page.getByRole('button', { name: 'Start a new batch' }).click();
   await expect(page.locator('.result-row')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Choose PDF from Drive' })).toBeEnabled();

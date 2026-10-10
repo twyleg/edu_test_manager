@@ -19,18 +19,22 @@ export async function scanPdf(
   signal.throwIfAborted();
   // PDF.js transfers its input buffer. Retain the original for lossless splitting.
   const loading = getDocument({ data: bytes.slice() });
-  loading.onPassword = () => { void loading.destroy(); };
+  loading.onPassword = () => {
+    void loading.destroy();
+  };
   const scanners: QrScanner[] = [];
   const results: PageScan[] = [];
   let stopped = false;
   const stop = () => {
     stopped = true;
-    scanners.forEach(scanner => scanner.stop());
+    scanners.forEach((scanner) => scanner.stop());
     void loading.destroy();
   };
   const check = () => {
     signal.throwIfAborted();
-    if (stopped) throw new Error('Scan stopped.');
+    if (stopped) {
+      throw new Error('Scan stopped.');
+    }
   };
   signal.addEventListener('abort', stop, { once: true });
   try {
@@ -51,14 +55,18 @@ export async function scanPdf(
           let hasQr = false;
           for (const longestSide of [1600, 2600]) {
             check();
-            const viewport = page.getViewport({ scale: longestSide / Math.max(original.width, original.height) });
+            const viewport = page.getViewport({
+              scale: longestSide / Math.max(original.width, original.height),
+            });
             canvas.width = Math.ceil(viewport.width);
             // The smaller canvas clips rendering to the full-width top 20%.
             canvas.height = Math.ceil(viewport.height * 0.2);
             await page.render({ canvas, canvasContext: context, viewport }).promise;
             check();
             hasQr = await scanner.detect(context.getImageData(0, 0, canvas.width, canvas.height));
-            if (hasQr) break;
+            if (hasQr) {
+              break;
+            }
           }
           check();
           // Render a separate, inexpensive full-page preview, preserving review context.
@@ -66,68 +74,116 @@ export async function scanPdf(
           canvas.width = Math.ceil(viewport.width);
           canvas.height = Math.ceil(viewport.height);
           await page.render({ canvas, canvasContext: context, viewport }).promise;
-          const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(
-            value => value ? resolve(value) : reject(new Error('Could not create page preview.')), 'image/jpeg', 0.75,
-          ));
+          const blob = await new Promise<Blob>((resolve, reject) =>
+            canvas.toBlob(
+              (value) =>
+                value ? resolve(value) : reject(new Error('Could not create page preview.')),
+              'image/jpeg',
+              0.75,
+            ),
+          );
           check();
           results[pageNumber - 1] = { pageNumber, hasQr, thumbnailUrl: URL.createObjectURL(blob) };
           onProgress(++completed, pdf.numPages);
         } finally {
-          canvas.width = canvas.height = 0;
+          canvas.height = 0;
+          canvas.width = 0;
           page.cleanup();
         }
       }
     };
-    for (let index = 0; index < Math.min(threads, pdf.numPages); index++) scanners.push(new QrScanner());
+    for (let index = 0; index < Math.min(threads, pdf.numPages); index++) {
+      scanners.push(new QrScanner());
+    }
     // Wait for every runner to settle before reclaiming previews on failure.
-    const outcomes = await Promise.allSettled(scanners.map(scanner => run(scanner).catch(error => {
-      stop();
-      throw error;
-    })));
-    const failure = outcomes.find(result => result.status === 'rejected');
-    if (failure?.status === 'rejected') throw failure.reason;
+    const outcomes = await Promise.allSettled(
+      scanners.map((scanner) =>
+        run(scanner).catch((error) => {
+          stop();
+          throw error;
+        }),
+      ),
+    );
+    const failure = outcomes.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') {
+      throw failure.reason;
+    }
     check();
     return results;
   } catch (error) {
-    results.forEach(page => URL.revokeObjectURL(page.thumbnailUrl));
-    if (signal.aborted) throw new DOMException('Scan cancelled.', 'AbortError');
-    throw new Error('Could not read this PDF. Use an unencrypted, valid PDF. ' + (error instanceof Error ? error.message : ''));
+    results.forEach((page) => URL.revokeObjectURL(page.thumbnailUrl));
+    if (signal.aborted) {
+      throw new DOMException('Scan cancelled.', 'AbortError');
+    }
+    throw new Error(
+      'Could not read this PDF. Use an unencrypted, valid PDF. ' +
+        (error instanceof Error ? error.message : ''),
+    );
   } finally {
     signal.removeEventListener('abort', stop);
-    scanners.forEach(scanner => scanner.stop());
+    scanners.forEach((scanner) => scanner.stop());
     await loading.destroy();
   }
 }
 
-export async function splitPdf(bytes: Uint8Array, name: string, pages: PageScan[], frontPages: boolean[]): Promise<ExamFile[]> {
+export async function splitPdf(
+  bytes: Uint8Array,
+  name: string,
+  pages: PageScan[],
+  frontPages: boolean[],
+): Promise<ExamFile[]> {
   const ranges = groupPages(frontPages);
   const source = await PDFDocument.load(bytes);
-  if (source.getPageCount() !== frontPages.length) throw new Error('Page count changed. Please scan the PDF again.');
+  if (source.getPageCount() !== frontPages.length) {
+    throw new Error('Page count changed. Please scan the PDF again.');
+  }
   const files: ExamFile[] = [];
   try {
     for (const [index, range] of ranges.entries()) {
       const output = await PDFDocument.create();
-      const selected = pages.slice(range.start - 1, range.end).filter((page, index) => index === 0 || !page.skipped);
-      const copied = await output.copyPages(source, selected.map(page => page.pageNumber - 1));
+      const selected = pages
+        .slice(range.start - 1, range.end)
+        .filter((page, index) => index === 0 || !page.skipped);
+      const copied = await output.copyPages(
+        source,
+        selected.map((page) => page.pageNumber - 1),
+      );
       copied.forEach((page, index) => {
-        page.setRotation(degrees((page.getRotation().angle + (selected[index].rotation || 0)) % 360));
+        page.setRotation(
+          degrees((page.getRotation().angle + (selected[index].rotation || 0)) % 360),
+        );
         output.addPage(page);
       });
       const blob = new Blob([new Uint8Array(await output.save())], { type: 'application/pdf' });
-      files.push({ ...range, pageNumbers: selected.map(page => page.pageNumber), name: examFilename(name, index, range), blob,
-        previewUrl: URL.createObjectURL(blob), thumbnailUrl: pages[range.start - 1].thumbnailUrl, uploaded: false });
+      files.push({
+        ...range,
+        pageNumbers: selected.map((page) => page.pageNumber),
+        name: examFilename(name, index, range),
+        blob,
+        previewUrl: URL.createObjectURL(blob),
+        thumbnailUrl: pages[range.start - 1].thumbnailUrl,
+        uploaded: false,
+      });
     }
     return files;
   } catch (error) {
-    files.forEach(file => URL.revokeObjectURL(file.previewUrl));
+    files.forEach((file) => URL.revokeObjectURL(file.previewUrl));
     throw error;
   }
 }
 
-export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, canvas: HTMLCanvasElement, signal: AbortSignal, rotation = 0): Promise<number> {
+export async function renderPagePreview(
+  bytes: Uint8Array,
+  pageNumber: number,
+  canvas: HTMLCanvasElement,
+  signal: AbortSignal,
+  rotation = 0,
+): Promise<number> {
   signal.throwIfAborted();
   const loading = getDocument({ data: bytes.slice() });
-  const abort = () => { void loading.destroy(); };
+  const abort = () => {
+    void loading.destroy();
+  };
   signal.addEventListener('abort', abort, { once: true });
   loading.onPassword = abort;
   try {
@@ -135,7 +191,10 @@ export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, c
     signal.throwIfAborted();
     const page = await pdf.getPage(pageNumber);
     const original = page.getViewport({ scale: 1, rotation: page.rotate + rotation });
-    const viewport = page.getViewport({ scale: 2200 / Math.max(original.width, original.height), rotation: page.rotate + rotation });
+    const viewport = page.getViewport({
+      scale: 2200 / Math.max(original.width, original.height),
+      rotation: page.rotate + rotation,
+    });
     canvas.width = Math.ceil(viewport.width);
     canvas.height = Math.ceil(viewport.height);
     await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport }).promise;
@@ -143,7 +202,10 @@ export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, c
   } finally {
     signal.removeEventListener('abort', abort);
     await loading.destroy();
-    if (signal.aborted) canvas.width = canvas.height = 0;
+    if (signal.aborted) {
+      canvas.height = 0;
+      canvas.width = 0;
+    }
   }
 }
 
@@ -151,7 +213,9 @@ export async function renderPagePreview(bytes: Uint8Array, pageNumber: number, c
 export async function createExamPreviewPdf(bytes: Uint8Array, signal: AbortSignal): Promise<Blob> {
   signal.throwIfAborted();
   const loading = getDocument({ data: bytes.slice() });
-  const abort = () => { void loading.destroy(); };
+  const abort = () => {
+    void loading.destroy();
+  };
   loading.onPassword = abort;
   signal.addEventListener('abort', abort, { once: true });
   const canvas = document.createElement('canvas');
@@ -163,23 +227,35 @@ export async function createExamPreviewPdf(bytes: Uint8Array, signal: AbortSigna
     const original = page.getViewport({ scale: 1 });
     const viewport = page.getViewport({ scale: 2400 / Math.max(original.width, original.height) });
     canvas.width = Math.ceil(viewport.width);
-    canvas.height = Math.max(1, Math.floor(viewport.height * .2));
+    canvas.height = Math.max(1, Math.floor(viewport.height * 0.2));
     await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport }).promise;
     signal.throwIfAborted();
-    const png = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Could not render the exam preview.')), 'image/png'));
+    const png = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (value) =>
+          value ? resolve(value) : reject(new Error('Could not render the exam preview.')),
+        'image/png',
+      ),
+    );
     const output = await PDFDocument.create();
     const image = await output.embedPng(await png.arrayBuffer());
     signal.throwIfAborted();
-    const preview = output.addPage([original.width, original.height * .2]);
+    const preview = output.addPage([original.width, original.height * 0.2]);
     // Embed just the rendered strip, leaving the remaining exam content out of the preview file.
-    preview.drawImage(image, { x: 0, y: 0, width: preview.getWidth(), height: preview.getHeight() });
+    preview.drawImage(image, {
+      x: 0,
+      y: 0,
+      width: preview.getWidth(),
+      height: preview.getHeight(),
+    });
     const saved = await output.save();
     signal.throwIfAborted();
     return new Blob([saved as Uint8Array<ArrayBuffer>], { type: 'application/pdf' });
   } finally {
     signal.removeEventListener('abort', abort);
     await loading.destroy();
-    canvas.width = canvas.height = 0;
+    canvas.height = 0;
+    canvas.width = 0;
   }
 }
 
@@ -191,7 +267,9 @@ export async function renderNameCrop(bytes: Uint8Array, signal: AbortSignal): Pr
 export async function renderNameCropBlob(bytes: Uint8Array, signal: AbortSignal): Promise<Blob> {
   signal.throwIfAborted();
   const loading = getDocument({ data: bytes.slice() });
-  const abort = () => { void loading.destroy(); };
+  const abort = () => {
+    void loading.destroy();
+  };
   loading.onPassword = abort;
   signal.addEventListener('abort', abort, { once: true });
   const canvas = document.createElement('canvas');
@@ -200,14 +278,25 @@ export async function renderNameCropBlob(bytes: Uint8Array, signal: AbortSignal)
     const page = await pdf.getPage(1);
     const original = page.getViewport({ scale: 1 });
     const viewport = page.getViewport({ scale: 2000 / Math.max(original.width, original.height) });
-    canvas.width = Math.ceil(viewport.width * .5);
-    canvas.height = Math.ceil(viewport.height * .25);
-    await page.render({ canvas, canvasContext: canvas.getContext('2d')!, viewport, transform: [1, 0, 0, 1, -viewport.width * .5, 0] }).promise;
-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('Could not render the name area.')), 'image/png'));
+    canvas.width = Math.ceil(viewport.width * 0.5);
+    canvas.height = Math.ceil(viewport.height * 0.25);
+    await page.render({
+      canvas,
+      canvasContext: canvas.getContext('2d')!,
+      viewport,
+      transform: [1, 0, 0, 1, -viewport.width * 0.5, 0],
+    }).promise;
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (value) => (value ? resolve(value) : reject(new Error('Could not render the name area.'))),
+        'image/png',
+      ),
+    );
     signal.throwIfAborted();
     return blob;
   } finally {
-    canvas.width = canvas.height = 0;
+    canvas.height = 0;
+    canvas.width = 0;
     signal.removeEventListener('abort', abort);
     await loading.destroy();
   }

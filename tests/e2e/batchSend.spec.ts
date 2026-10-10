@@ -1,30 +1,42 @@
 import { expect, test } from '@playwright/test';
 import { mockGoogleUi } from './googleMock';
 
-test('batch send uses the exact label query, paginates and sends only checked drafts', async ({ page }) => {
+test('batch send uses the exact label query, paginates and sends only checked drafts', async ({
+  page,
+}) => {
   await mockGoogleUi(page);
   const sent: string[] = [];
   let changed = false;
   let fail = false;
   let account = 'teacher@example.org';
   let reorder = false;
-  await page.route('https://gmail.googleapis.com/**', async route => {
+  await page.route('https://gmail.googleapis.com/**', async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.split('/users/me/')[1];
     const json = (value: unknown, status = 200) => route.fulfill({ status, json: value });
-    if (path === 'profile') return json({ emailAddress: account });
+    if (path === 'profile') {
+      return json({ emailAddress: account });
+    }
     if (path === 'drafts') {
       expect(url.searchParams.get('q')).toBe('label:bulk-send');
-      return json(url.searchParams.has('pageToken') ? { drafts: [{ id: 'b' }] } : { drafts: [{ id: 'a' }], nextPageToken: 'next' });
+      return json(
+        url.searchParams.has('pageToken')
+          ? { drafts: [{ id: 'b' }] }
+          : { drafts: [{ id: 'a' }], nextPageToken: 'next' },
+      );
     }
     if (path === 'drafts/send') {
       const id = route.request().postDataJSON().id;
       sent.push(id);
-      return fail ? json({ error: { message: 'Temporary failure' } }, 503) : json({ id: `sent-${id}` });
+      return fail
+        ? json({ error: { message: 'Temporary failure' } }, 503)
+        : json({ id: `sent-${id}` });
     }
     const id = path.split('/')[1];
     const headers = [
-      { name: 'Subject', value: `Exam ${id}` }, { name: 'To', value: `${id}@example.org` }, { name: 'Bcc', value: 'archive@example.org' },
+      { name: 'Subject', value: `Exam ${id}` },
+      { name: 'To', value: `${id}@example.org` },
+      { name: 'Bcc', value: 'archive@example.org' },
     ];
     const parts = [{ filename: `${id}.pdf` }];
     // Identical JSON data can arrive with a different object property order.
@@ -74,7 +86,13 @@ test('batch send uses the exact label query, paginates and sends only checked dr
 
 test('empty label search explains Gmail limitation', async ({ page }) => {
   await mockGoogleUi(page);
-  await page.route('https://gmail.googleapis.com/**', route => route.fulfill({ json: route.request().url().endsWith('profile') ? { emailAddress: 'teacher@example.org' } : { drafts: [] } }));
+  await page.route('https://gmail.googleapis.com/**', (route) =>
+    route.fulfill({
+      json: route.request().url().endsWith('profile')
+        ? { emailAddress: 'teacher@example.org' }
+        : { drafts: [] },
+    }),
+  );
   await page.goto('/');
   await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Batch send', exact: true }).click();

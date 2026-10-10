@@ -24,31 +24,50 @@ export function openScanPreview(drive: GoogleDrive, item: DriveItem, triggerId: 
   const previousOverflow = document.body.style.overflow;
   document.body.append(dialog);
   document.body.style.overflow = 'hidden';
-  dialog.addEventListener('close', () => {
-    controller.abort(); bytes = undefined;
-    canvas.width = canvas.height = 0;
-    dialog.remove(); document.body.style.overflow = previousOverflow;
-    document.getElementById(triggerId)?.focus({ preventScroll: true });
-  }, { once: true });
+  dialog.addEventListener(
+    'close',
+    () => {
+      controller.abort();
+      bytes = undefined;
+      canvas.height = 0;
+      canvas.width = 0;
+      dialog.remove();
+      document.body.style.overflow = previousOverflow;
+      document.getElementById(triggerId)?.focus({ preventScroll: true });
+    },
+    { once: true },
+  );
   dialog.querySelector('[data-close]')!.addEventListener('click', () => dialog.close());
   async function render(): Promise<void> {
-    if (rendering || controller.signal.aborted) return;
-    rendering = true; previous.disabled = next.disabled = true;
-    retry.hidden = true; canvas.hidden = true; status.hidden = false;
+    if (rendering || controller.signal.aborted) {
+      return;
+    }
+    rendering = true;
+    next.disabled = true;
+    previous.disabled = true;
+    retry.hidden = true;
+    canvas.hidden = true;
+    status.hidden = false;
     status.setAttribute('role', 'status');
     status.textContent = bytes ? `Loading page ${pageNumber}…` : 'Downloading scan…';
     try {
       bytes ??= await drive.downloadPdf(item, controller.signal, (received, total) => {
-        if (!controller.signal.aborted) status.textContent = total ? `Downloading scan… ${Math.round(received / total * 100)}%` : 'Downloading scan…';
+        if (!controller.signal.aborted) {
+          status.textContent = total
+            ? `Downloading scan… ${Math.round((received / total) * 100)}%`
+            : 'Downloading scan…';
+        }
       });
       controller.signal.throwIfAborted();
       const { renderPagePreview } = await import('./pdf');
       pageCount = await renderPagePreview(bytes, pageNumber, canvas, controller.signal);
       controller.signal.throwIfAborted();
       canvas.setAttribute('aria-label', `Page ${pageNumber} of ${pageCount} of ${item.name}`);
-      canvas.hidden = false; status.hidden = true;
+      canvas.hidden = false;
+      status.hidden = true;
       pageLabel.textContent = `Page ${pageNumber} of ${pageCount}`;
-      previous.disabled = pageNumber <= 1; next.disabled = pageNumber >= pageCount;
+      previous.disabled = pageNumber <= 1;
+      next.disabled = pageNumber >= pageCount;
     } catch (error) {
       if (!controller.signal.aborted) {
         bytes = undefined;
@@ -56,11 +75,25 @@ export function openScanPreview(drive: GoogleDrive, item: DriveItem, triggerId: 
         status.textContent = `Could not preview this scan. ${error instanceof Error ? error.message : ''}`;
         retry.hidden = false;
       }
-    } finally { rendering = false; }
+    } finally {
+      rendering = false;
+    }
   }
-  previous.addEventListener('click', () => { if (!rendering && pageNumber > 1) { pageNumber--; void render(); } });
-  next.addEventListener('click', () => { if (!rendering && pageNumber < pageCount) { pageNumber++; void render(); } });
-  retry.addEventListener('click', () => { void render(); });
+  previous.addEventListener('click', () => {
+    if (!rendering && pageNumber > 1) {
+      pageNumber--;
+      void render();
+    }
+  });
+  next.addEventListener('click', () => {
+    if (!rendering && pageNumber < pageCount) {
+      pageNumber++;
+      void render();
+    }
+  });
+  retry.addEventListener('click', () => {
+    void render();
+  });
   dialog.showModal();
   void render();
 }

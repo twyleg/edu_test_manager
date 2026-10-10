@@ -198,22 +198,29 @@ OCR is not used as a prefilter: it would add text recognition work and could exc
 
 ## Verification
 
+Contribution guidelines are in [CONTRIBUTING.md](CONTRIBUTING.md). Run the formatter before checking changes:
+
 ```bash
-npm run build
+npm run format
+npm run format:check
+npm run lint
 npm test
+npm run build
 npx playwright install chromium
-npm run test:e2e
+npm run uat
 ```
+
+`npm run uat` runs the browser acceptance tests against a Vite server with fictional Google configuration. The tests generate their PDFs and student lists in memory and mock Google sign-in, Picker, Drive, and Gmail responses. No live Google account, student archive, or local sample PDF is required. Local-sample tests and the opt-in benchmark are excluded even when sample files are present. Synthetic results validate workflow behavior, not recognition accuracy on real exams.
 
 To use an existing Chromium/Chrome installation instead:
 
 ```bash
-PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/opt/google/chrome/chrome npm run test:e2e
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/opt/google/chrome/chrome npm run uat
 ```
 
 For an opt-in timing run against the local sample, use `SCAN_BENCHMARK=1 npm run test:e2e -- benchmark.spec.ts` (with the browser executable environment variable above if needed). It reports scan times for 1, 2 and 4 workers; PDF import and file transfer are outside the timer.
 
-Unit tests cover grouping, leading-page handling, naming, Drive permissions, token expiry and retry-safe uploads. Browser tests exercise actual PDF rendering/detection/splitting, manual corrections, and a simulated Google Picker/Drive workflow. The sample-PDF test runs with `resources/example_lzk.pdf` (or the legacy root filename `20260911_142302_005443.pdf`); PDFs are ignored by Git to avoid committing student scans. Live Google OAuth and upload still need a manual check with your project credentials.
+Unit tests cover grouping, leading-page handling, naming, Drive permissions, token expiry and retry-safe uploads. Browser tests exercise actual PDF rendering/detection/splitting, manual corrections, and a simulated Google Picker/Drive workflow. `npm run test:e2e` also includes optional local-sample tests using `resources/example_lzk.pdf` (or the legacy root filename `20260911_142302_005443.pdf`); PDFs are ignored by Git to avoid committing student scans. Use generated documents for development. Live Google OAuth and upload still need a manual check with your project credentials.
 
 ## Source map
 

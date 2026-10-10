@@ -16,7 +16,7 @@ export function hasGoogleConfig(): boolean {
 }
 
 export function getGoogleConfigError(config = googleConfig): string | undefined {
-  if (!Object.values(config).every(value => value && !value.startsWith('your-'))) {
+  if (!Object.values(config).every((value) => value && !value.startsWith('your-'))) {
     return 'Add the three Google values from .env.example to .env, then restart the app.';
   }
   if (!/^\d+$/.test(config.appId!)) {

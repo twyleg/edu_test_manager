@@ -2,17 +2,35 @@ const preferenceKey = 'edu-test-manager-privacy-v1';
 export const studentFolderStorageKey = 'edu-test-manager-student-list-folder';
 export const documentationHighlightsStorageKey = 'edu-test-manager-documentation-highlights-v1';
 const lifetime = 180 * 24 * 60 * 60 * 1000;
-interface Preferences { google: boolean; rememberFolder: boolean; expires: number }
+interface Preferences {
+  google: boolean;
+  rememberFolder: boolean;
+  expires: number;
+}
 let preferences: Preferences | undefined;
 try {
   const saved = JSON.parse(localStorage.getItem(preferenceKey) || 'null') as Preferences | null;
-  if (saved && typeof saved.google === 'boolean' && typeof saved.rememberFolder === 'boolean' && saved.expires > Date.now() && saved.expires <= Date.now() + lifetime) preferences = saved;
-} catch { /* Consent can also be kept in memory when browser storage is unavailable. */ }
+  if (
+    saved &&
+    typeof saved.google === 'boolean' &&
+    typeof saved.rememberFolder === 'boolean' &&
+    saved.expires > Date.now() &&
+    saved.expires <= Date.now() + lifetime
+  ) {
+    preferences = saved;
+  }
+} catch {
+  /* Consent can also be kept in memory when browser storage is unavailable. */
+}
 export const googleAllowed = () => Boolean(preferences?.google);
 export const localOnly = () => preferences?.google === false;
-export const rememberStudentFolder = () => Boolean(preferences?.google && preferences.rememberFolder);
+export const rememberStudentFolder = () =>
+  Boolean(preferences?.google && preferences.rememberFolder);
 
-export function mountPrivacy(onChange: (google: boolean, previouslyAllowed: boolean) => void, isBusy: () => boolean): void {
+export function mountPrivacy(
+  onChange: (google: boolean, previouslyAllowed: boolean) => void,
+  isBusy: () => boolean,
+): void {
   const host = document.createElement('aside');
   host.className = 'privacy-shell';
   document.body.append(host);
@@ -28,19 +46,47 @@ export function mountPrivacy(onChange: (google: boolean, previouslyAllowed: bool
       <p id="privacy-feedback" role="status"></p>
       </section>`;
   };
-  host.addEventListener('click', event => {
+  host.addEventListener('click', (event) => {
     const id = (event.target as HTMLElement).closest('button')?.id;
-    if (id === 'privacy-settings') { expanded = !expanded; render(); return; }
-    if (!['privacy-remember', 'privacy-google', 'privacy-local'].includes(id || '')) return;
-    if (isBusy()) { host.querySelector('#privacy-feedback')!.textContent = 'Finish the current operation before changing these settings.'; return; }
+    if (id === 'privacy-settings') {
+      expanded = !expanded;
+      render();
+      return;
+    }
+    if (!['privacy-remember', 'privacy-google', 'privacy-local'].includes(id || '')) {
+      return;
+    }
+    if (isBusy()) {
+      host.querySelector('#privacy-feedback')!.textContent =
+        'Finish the current operation before changing these settings.';
+      return;
+    }
     const previous = googleAllowed();
-    preferences = { google: id !== 'privacy-local', rememberFolder: id === 'privacy-remember', expires: Date.now() + lifetime };
+    preferences = {
+      google: id !== 'privacy-local',
+      rememberFolder: id === 'privacy-remember',
+      expires: Date.now() + lifetime,
+    };
     try {
       localStorage.setItem(preferenceKey, JSON.stringify(preferences));
-      if (!preferences.rememberFolder) { localStorage.removeItem(studentFolderStorageKey); localStorage.removeItem('edu-test-manager-workflow-v1'); localStorage.removeItem(documentationHighlightsStorageKey); }
-    } catch { /* A blocked store must not prevent use of the application. */ }
-    if (!preferences.google) { try { sessionStorage.removeItem('edu-test-manager-token'); } catch { /* Storage unavailable. */ } }
-    expanded = false; render(); onChange(preferences.google, previous);
+      if (!preferences.rememberFolder) {
+        localStorage.removeItem(studentFolderStorageKey);
+        localStorage.removeItem('edu-test-manager-workflow-v1');
+        localStorage.removeItem(documentationHighlightsStorageKey);
+      }
+    } catch {
+      /* A blocked store must not prevent use of the application. */
+    }
+    if (!preferences.google) {
+      try {
+        sessionStorage.removeItem('edu-test-manager-token');
+      } catch {
+        /* Storage unavailable. */
+      }
+    }
+    expanded = false;
+    render();
+    onChange(preferences.google, previous);
   });
   render();
 }

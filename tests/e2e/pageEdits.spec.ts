@@ -2,15 +2,23 @@ import { test, expect } from '@playwright/test';
 import { PDFDocument, degrees } from 'pdf-lib';
 import { mockGoogleUi } from './googleMock';
 
-test('page edits update previews and output, while front pages remain protected', async ({ page }) => {
+test('page edits update previews and output, while front pages remain protected', async ({
+  page,
+}) => {
   await mockGoogleUi(page);
   const source = await PDFDocument.create();
-  for (let i = 0; i < 6; i++) source.addPage([400 + i * 10, 600]);
+  for (let i = 0; i < 6; i++) {
+    source.addPage([400 + i * 10, 600]);
+  }
   source.getPage(2).setRotation(degrees(90));
   await page.goto('/');
   await page.locator('#connect').click();
   await page.getByRole('tab', { name: 'Slice exams', exact: true }).click();
-  await page.locator('#local-pdf').setInputFiles({ name: 'edits.pdf', mimeType: 'application/pdf', buffer: Buffer.from(await source.save()) });
+  await page.locator('#local-pdf').setInputFiles({
+    name: 'edits.pdf',
+    mimeType: 'application/pdf',
+    buffer: Buffer.from(await source.save()),
+  });
   await page.getByRole('button', { name: 'Scan PDF', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Scan complete');
   await page.locator('#front-0').check();
@@ -27,22 +35,51 @@ test('page edits update previews and output, while front pages remain protected'
   await page.getByRole('button', { name: 'View page 3', exact: true }).click();
   const preview = page.getByRole('dialog');
   await expect(preview.locator('canvas')).toBeVisible();
-  expect(await preview.locator('canvas').evaluate(canvas => canvas.height > canvas.width)).toBe(true);
+  expect(await preview.locator('canvas').evaluate((canvas) => canvas.height > canvas.width)).toBe(
+    true,
+  );
   await page.keyboard.press('Escape');
   await page.locator('[data-page-index="3"]').dragTo(page.locator('[data-page-index="2"]'));
-  await expect(page.locator('.exam-group').first().locator('.page-index')).toHaveText(['1', '2', '4', '3']);
+  await expect(page.locator('.exam-group').first().locator('.page-index')).toHaveText([
+    '1',
+    '2',
+    '4',
+    '3',
+  ]);
   await page.getByRole('button', { name: 'Move page 4 earlier', exact: true }).click();
-  await expect(page.locator('.exam-group').first().locator('.page-index')).toHaveText(['1', '4', '2', '3']);
+  await expect(page.locator('.exam-group').first().locator('.page-index')).toHaveText([
+    '1',
+    '4',
+    '2',
+    '3',
+  ]);
   await page.getByRole('button', { name: 'Move page 4 later', exact: true }).click();
   await page.locator('[data-page-index="3"]').dragTo(page.locator('[data-page-index="5"]'));
-  await expect(page.locator('.exam-group').first().locator('.page-index')).toHaveText(['1', '2', '4', '3']);
+  await expect(page.locator('.exam-group').first().locator('.page-index')).toHaveText([
+    '1',
+    '2',
+    '4',
+    '3',
+  ]);
   await page.getByRole('button', { name: 'Prepare 2 PDFs', exact: true }).click();
   await expect(page.locator('.result-row')).toHaveCount(2);
   for (let index = 0; index < 2; index++) {
-    const bytes = await page.locator('.result-row').nth(index).getByRole('link', { name: 'Download', exact: true }).evaluate(async link => Array.from(new Uint8Array(await (await fetch((link as HTMLAnchorElement).href)).arrayBuffer())));
+    const bytes = await page
+      .locator('.result-row')
+      .nth(index)
+      .getByRole('link', { name: 'Download', exact: true })
+      .evaluate(async (link) =>
+        Array.from(
+          new Uint8Array(await (await fetch((link as HTMLAnchorElement).href)).arrayBuffer()),
+        ),
+      );
     const output = await PDFDocument.load(new Uint8Array(bytes));
-    expect(output.getPages().map(p => p.getWidth())).toEqual(index === 0 ? [400, 430, 420] : [440, 450]);
-    expect(output.getPages().map(p => p.getRotation().angle)).toEqual(index === 0 ? [0, 0, 180] : [0, 0]);
+    expect(output.getPages().map((p) => p.getWidth())).toEqual(
+      index === 0 ? [400, 430, 420] : [440, 450],
+    );
+    expect(output.getPages().map((p) => p.getRotation().angle)).toEqual(
+      index === 0 ? [0, 0, 180] : [0, 0],
+    );
   }
   await page.locator('#toggle-review').click();
   await page.getByRole('button', { name: 'Rotate page 1 left', exact: true }).click();
